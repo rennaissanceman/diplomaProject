@@ -1,4 +1,4 @@
-# 🧠 Multi-RAG AI Assistant
+# Multi-RAG AI Assistant
 
 This project implements a **Multi-Agent Retrieval-Augmented Generation (Multi-RAG)** system using a local LLM stack.
 
@@ -11,7 +11,7 @@ The application consists of:
 
 ---
 
-## 📌 Project Overview
+## Project Overview
 
 Each agent has:
 
@@ -27,7 +27,7 @@ The system performs:
 
 ---
 
-## 🧩 Key Features
+## Key Features
 
 - Multi-agent architecture (specialists + supervisor)
 - Per-agent RAG (separate indexes)
@@ -111,7 +111,7 @@ Builds index for a single agent.
 
 ---
 
-# 🚀 Full Setup (Step-by-step)
+# Full Setup (Step-by-step)
 
 ## 1. Clone repository
 git clone https://github.com/agorkaissi/diplomaProject.git
@@ -173,7 +173,7 @@ npm start
 
 ---
 
-# 🔌 API Example
+# API Example
 
 POST `/chat`
 
@@ -185,7 +185,7 @@ POST `/chat`
 
 ---
 
-# 📊 Debug Metadata (ETAP 8)
+# Debug Metadata (ETAP 8)
 
 Each response includes debug data:
 
@@ -205,7 +205,7 @@ Each response includes debug data:
 
 ---
 
-# 🧠 Notes
+# Notes
 
 - Retrieval is done per agent (Multi-RAG)
 - Each agent has its own FAISS index
@@ -214,7 +214,7 @@ Each response includes debug data:
 
 ---
 
-# ⚠️ Limitations
+# Limitations
 
 - Small LLM (llama3.2:1b)
 - No reranking yet
@@ -223,7 +223,7 @@ Each response includes debug data:
 
 ---
 
-# 🚀 Future Improvements
+# Future Improvements
 
 - semantic routing
 - hybrid retrieval (BM25 + embeddings)
@@ -232,7 +232,7 @@ Each response includes debug data:
 - multi-agent comparison
 
 ---
-# 📁 Project Structure
+# Project Structure
 
 ```text
 diplomaProject/
