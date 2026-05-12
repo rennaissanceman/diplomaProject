@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import Scenarios from "./pages/Scenarios";
 import AgentsConfiguration from "./pages/dashboard/agentsConfiguration";
 import AgentsOverview from "./pages/dashboard/agentsOverview";
+import DocumentsManagement from "./pages/dashboard/documentsManagement";
 
 const router = createBrowserRouter([
     {
@@ -35,6 +36,10 @@ const router = createBrowserRouter([
             {
                 path: "/agentsOverview",
                 element: <AgentsOverview />
+            },
+            {
+                path: "/documentsManagement",
+                element: <DocumentsManagement />
             }
         ]
     }

@@ -18,9 +18,9 @@ const Dashboard = () => {
                     <h5>Configuration</h5>
                 </div>
 
-                <div className="tile">
-                    <h5>Logs</h5>
-                    <h5 style={{ color: '#e63946' }}>Not implemented</h5>
+                <div className="tile" onClick={() => navigate("/documentsManagement")}>
+                    <h5>Documents</h5>
+                    <h5>Management</h5>
                 </div>
 
                 <div className="tile">
