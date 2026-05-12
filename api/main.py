@@ -1,8 +1,12 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, File, Form, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from starlette.middleware.cors import CORSMiddleware
+from mimetypes import guess_type
+
 from db import Base, engine, get_db
 from router import route_with_langgraph
 from runtime import run_agent_with_debug
@@ -18,6 +22,8 @@ from schemas import (
 )
 import models
 import logging
+import re
+import shutil
 
 
 logging.basicConfig(
@@ -33,6 +39,16 @@ app = FastAPI(
     title="Diploma project",
     lifespan=lifespan,
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000","http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DATA_DIR = Path("data").resolve()
 
 def to_agent_response(agent:Agent) -> AgentResponse:
     connected_agent_ids = [
@@ -279,3 +295,191 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         ),
     )
 
+
+ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
+
+@app.post("/documents/upload")
+async def upload_documents(
+    folder_name: str = Form(...),
+    files: list[UploadFile] = File(...),
+):
+    if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid folder name"
+        )
+
+    target_folder = (DATA_DIR / folder_name).resolve()
+
+    if DATA_DIR not in target_folder.parents and target_folder != DATA_DIR:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid folder path"
+        )
+
+    target_folder.mkdir(parents=True, exist_ok=True)
+
+    saved_files: list[str] = []
+
+    for file in files:
+        if not file.filename:
+            continue
+
+        ext = Path(file.filename).suffix.lower()
+
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {ext}"
+            )
+
+        file_path = target_folder / file.filename
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        saved_files.append(file.filename)
+
+    return {
+        "message": "Files uploaded successfully",
+        "folder": folder_name,
+        "files": saved_files,
+    }
+
+@app.get("/documents/{folder_name}")
+async def get_documents(folder_name: str):
+
+    if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid folder name"
+        )
+
+    target_folder = (DATA_DIR / folder_name).resolve()
+
+    if DATA_DIR not in target_folder.parents and target_folder != DATA_DIR:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid folder path"
+        )
+
+    if not target_folder.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Folder not found"
+        )
+
+    documents = []
+
+    for file_path in target_folder.iterdir():
+
+        if not file_path.is_file():
+            continue
+
+        documents.append({
+            "filename": file_path.name,
+            "extension": file_path.suffix.lower(),
+            "size_bytes": file_path.stat().st_size,
+        })
+
+    return {
+        "folder": folder_name,
+        "documents": documents,
+    }
+
+@app.get("/documents/{folder_name}/{filename}")
+async def get_document(
+    folder_name: str,
+    filename: str,
+    download: bool = False
+):
+    if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
+        raise HTTPException(
+            400,
+            "Invalid folder name"
+        )
+
+    target_folder = (DATA_DIR / folder_name).resolve()
+    file_path = (target_folder / filename).resolve()
+
+    if not file_path.exists():
+        raise HTTPException(
+            404,
+            "File not found"
+        )
+
+    mime_type, _ = guess_type(file_path)
+
+    if download:
+        return FileResponse(
+            path=file_path,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": "attachment"}
+        )
+
+    return FileResponse(
+        path=file_path,
+        media_type=mime_type or "text/plain",
+        headers={"Content-Disposition": "inline"}
+    )
+
+@app.delete("/documents/{folder_name}/{filename}")
+async def delete_document(
+    folder_name: str,
+    filename: str,
+):
+
+    if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid folder name"
+        )
+
+    target_folder = (DATA_DIR / folder_name).resolve()
+
+    if DATA_DIR not in target_folder.parents and target_folder != DATA_DIR:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid folder path"
+        )
+
+    file_path = (target_folder / filename).resolve()
+
+    if target_folder not in file_path.parents:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid filename"
+        )
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="File not found"
+        )
+
+    file_path.unlink()
+
+    return {
+        "message": "File deleted successfully",
+        "folder": folder_name,
+        "filename": filename,
+    }
+
+@app.get("/documents")
+async def list_document_folders():
+
+    if not DATA_DIR.exists():
+        return {"folders": []}
+
+    folders = []
+
+    for path in DATA_DIR.iterdir():
+
+        if path.is_dir():
+            folders.append({
+                "name": path.name
+            })
+
+    return {
+        "folders": folders
+    }

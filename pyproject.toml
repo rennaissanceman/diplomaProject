@@ -33,4 +33,5 @@ dependencies = [
     "pip-check-reqs>=2.5.6",
     "sentence-transformers>=5.4.1",
     "faiss-cpu>=1.13.2",
+    "python-multipart>=0.0.28",
 ]
