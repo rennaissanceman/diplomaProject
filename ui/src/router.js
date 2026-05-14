@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router-dom";
+import {createBrowserRouter} from "react-router-dom";
 
 import Layout from "./Layout";
 import Home from "./pages/Home";
@@ -8,38 +8,43 @@ import Scenarios from "./pages/Scenarios";
 import AgentsConfiguration from "./pages/dashboard/agentsConfiguration";
 import AgentsOverview from "./pages/dashboard/agentsOverview";
 import DocumentsManagement from "./pages/dashboard/documentsManagement";
+import LiveStatus from "./pages/dashboard/liveStatus";
 
 const router = createBrowserRouter([
     {
-        element: <Layout />,
+        element: <Layout/>,
         children: [
             {
                 path: "/",
-                element: <Home />
+                element: <Home/>
             },
             {
                 path: "/aiassistant",
-                element: <AiAssistant />
+                element: <AiAssistant/>
             },
             {
                 path: "/dashboard",
-                element: <Dashboard />
+                element: <Dashboard/>
             },
             {
                 path: "/scenarios",
-                element: <Scenarios />
+                element: <Scenarios/>
             },
             {
                 path: "/agentsConfiguration",
-                element: <AgentsConfiguration />
+                element: <AgentsConfiguration/>
             },
             {
                 path: "/agentsOverview",
-                element: <AgentsOverview />
+                element: <AgentsOverview/>
             },
             {
                 path: "/documentsManagement",
-                element: <DocumentsManagement />
+                element: <DocumentsManagement/>
+            },
+            {
+                path: "/liveStatus",
+                element: <LiveStatus/>
             }
         ]
     }
