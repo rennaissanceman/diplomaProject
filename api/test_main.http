@@ -22,6 +22,12 @@ Accept: application/json
 
 ###
 
+### LIST ALL DOCUMENTS
+GET http://127.0.0.1:8000/documents/hogwart
+Accept: application/json
+
+###
+
 ## =========================================================
 ## HR AGENT
 ## =========================================================

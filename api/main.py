@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from starlette.middleware.cors import CORSMiddleware
 from mimetypes import guess_type
-
+from datetime import datetime
 from db import Base, engine, get_db
 from router import route_with_langgraph
 from runtime import run_agent_with_debug
@@ -24,6 +24,7 @@ import models
 import logging
 import re
 import shutil
+import os
 
 
 logging.basicConfig(
@@ -391,7 +392,15 @@ async def get_documents(folder_name: str):
             "filename": file_path.name,
             "extension": file_path.suffix.lower(),
             "size_bytes": file_path.stat().st_size,
+            "modified_at": datetime.fromtimestamp(
+                os.path.getmtime(file_path)
+            ).isoformat()
         })
+
+    documents.sort(
+        key=lambda x: x["modified_at"],
+        reverse=True
+    )
 
     return {
         "folder": folder_name,
@@ -516,3 +525,4 @@ def get_rag_metrics():
         "avg_confidence": sum(m["confidence"] for m in rag_metrics_store) / n,
         "requests": n
     }
+
