@@ -38,20 +38,6 @@ const Dashboard = () => {
                     <h5 style={{ color: '#e63946' }}>Not implemented</h5>
                 </div>
 
-                <div className="tile">
-                    <h5>FunctionB</h5>
-                    <h5 style={{ color: '#e63946' }}>Not implemented</h5>
-                </div>
-
-                <div className="tile">
-                    <h5>FunctionC</h5>
-                    <h5 style={{ color: '#e63946' }}>Not implemented</h5>
-                </div>
-
-                <div className="tile">
-                    <h5>FunctionD</h5>
-                    <h5 style={{ color: '#e63946' }}>Not implemented</h5>
-                </div>
 
             </div>
         </div>
