@@ -249,6 +249,8 @@ def update_agent(agent_id: int, data: AgentUpdateSafe, db: Session = Depends(get
         }
     }
 
+rag_metrics_store = []
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, db: Session = Depends(get_db)):
     agent_name = route_with_langgraph(
@@ -269,6 +271,15 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         )
 
     answer, sources, debug = run_agent_with_debug(payload.question, agent, db)
+
+    rag_metrics_store.append({
+        "retrieval_time_ms": debug.retrieval_time_ms,
+        "generation_time_ms": debug.generation_time_ms,
+        "total_time_ms": debug.total_time_ms,
+        "confidence": debug.confidence,
+        "agent_type": debug.agent_type,
+        "chunks": len(debug.chunks)
+    })
 
     return ChatResponse(
         agent=agent.name,
@@ -482,4 +493,26 @@ async def list_document_folders():
 
     return {
         "folders": folders
+    }
+
+
+@app.get("/metrics/rag")
+def get_rag_metrics():
+    if not rag_metrics_store:
+        return {
+            "avg_retrieval_time_ms": 0,
+            "avg_generation_time_ms": 0,
+            "avg_total_time_ms": 0,
+            "avg_confidence": 0,
+            "requests": 0
+        }
+
+    n = len(rag_metrics_store)
+
+    return {
+        "avg_retrieval_time_ms": sum(m["retrieval_time_ms"] for m in rag_metrics_store) / n,
+        "avg_generation_time_ms": sum(m["generation_time_ms"] for m in rag_metrics_store) / n,
+        "avg_total_time_ms": sum(m["total_time_ms"] for m in rag_metrics_store) / n,
+        "avg_confidence": sum(m["confidence"] for m in rag_metrics_store) / n,
+        "requests": n
     }
