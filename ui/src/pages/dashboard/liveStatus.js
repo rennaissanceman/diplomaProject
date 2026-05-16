@@ -153,15 +153,27 @@ const LiveStatus = () => {
     const latestDocument = documents[0];
 
     const fetchMetrics = async () => {
-        const res = await fetch("http://localhost:8000/metrics/rag");
-        const data = await res.json();
-        setMetrics(data);
+        try {
+            const res = await fetch("http://localhost:8000/metrics/rag");
+
+            if (!res.ok) {
+                throw new Error("Failed to fetch metrics");
+            }
+
+            const data = await res.json();
+            setMetrics(data);
+
+        } catch (err) {
+            console.error("Metrics fetch error:", err);
+
+        }
     };
 
     useEffect(() => {
         fetchMetrics();
 
         const interval = setInterval(fetchMetrics, 10000);
+
         return () => clearInterval(interval);
     }, []);
 

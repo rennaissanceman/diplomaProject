@@ -2,7 +2,29 @@
 diplomaProject
 
 # Description
-TBD
+This project implements a **Multi-Agent Retrieval-Augmented Generation (Multi-RAG)** system using a local LLM stack.
+Each agent has:
+
+- its own documents (`api/data/<agent>/`)
+- its own FAISS vector index (`api/indexes/<agent>/`)
+- its own retrieval pipeline
+
+The system performs:
+
+1. Retrieval (top-k chunks)
+2. Prompt construction
+3. Answer generation via local LLM (Ollama)
+
+## Key Features
+
+- Multi-agent architecture (specialists + supervisor)
+- Per-agent RAG (separate indexes)
+- Semantic retrieval (embeddings)
+- FAISS vector search
+- Offline ingest pipeline
+- Debug metadata
+- React UI
+- Fully local execution
 
 # Technologies Used
 - Python 3.12
@@ -18,60 +40,87 @@ TBD
 - Ollama client 
 - llama3.2:1b model
 
+# Assumptions
+
+- Small LLM (llama3.2:1b)
+- No reranking yet
+- No semantic routing
+- Confidence is heuristic
+
+# Future development
+
+- semantic routing
+- hybrid retrieval (BM25 + embeddings)
+- reranking layer
+- evaluation pipeline
+- multi-agent comparison
+
 # Project Structure
 ```
 diplomaProject/
-│
 ├── api/
-│   ├── data/
+│   ├── data/                 # source documents for agents
 │   │   ├── hogwart/
 │   │   ├── hr/
 │   │   ├── lotr/
-│   │   └── supervisor/
+│   │   └── PanTadeusz/
 │   │
-│   ├── .gitingore
-│   ├── agents.db
-│   ├── db.py
-│   ├── main.py
-│   ├── models.py
-│   ├── ollama_client.py
-│   ├── runtime.py
-│   ├── schemas.py
-│   └── test_main.http
-│ 
-├── ui/   
-│   ├── public
-│   │   ├── index.html
-│   │   ├── manifest.json
-│   │   └── robots.txt
-│   │ 
-│   └── src
-│       └── pages/
+│   ├── indexes/              # FAISS indexes generated during ingest
+│   │   ├── hr/
+│   │   ├── harrypotter/
+│   │   ├── frodo/
+│   │   └── ksrobak/
+│   │
+│   ├── prompts/              # prompt builders
+│   │   ├── __init__.py
+│   │   └── builders.py
+│   │
+│   ├── retrieval/            # RAG pipeline
+│   │   ├── __init__.py
+│   │   ├── chunking.py       # document chunking
+│   │   ├── embeddings.py     # embedding model
+│   │   ├── ingest.py         # offline indexing
+│   │   ├── retriever.py      # query-time retrieval
+│   │   ├── types.py          # retrieval data types
+│   │   └── vector_store.py   # FAISS vector store
+│   │
+│   ├── agents.db             # SQLite database
+│   ├── db.py                 # database configuration
+│   ├── main.py               # FastAPI entry point
+│   ├── models.py             # SQLAlchemy models
+│   ├── ollama_client.py      # Ollama client
+│   ├── router.py             # agent routing
+│   ├── runtime.py            # Multi-RAG orchestration
+│   ├── schemas.py            # API schemas
+│   └── test_main.http        # HTTP test requests
+│
+├── ui/
+│   ├── public/
+│   └── src/
+│       ├── pages/
 │       │   ├── dashboard/
+│       │   │   ├── agentsConfiguration.js
 │       │   │   ├── agentsOverview.js
-│       │   │   └── agentsConfiguration.js
+│       │   │   ├── documentsManagement.js
+│       │   │   └── liveStatus.js
 │       │   │ 
-│       │   ├── AiAssistant.js
-│       │   ├── Dashboard.js
-│       │   ├── Home.js
-│       │   └── Scenarios.js
+│       │   ├── AiAssistant.js     # main chat UI with RAG debug
+│       │   ├── Dashboard.js       # management panel
+│       │   ├── Home.js            # Homepage
+│       │   └── Scenarios.js       # Solution Tests
 │       │
 │       ├── App.css
 │       ├── App.js
-│       ├── App.test.js
-│       ├── Home.js
 │       ├── index.css
 │       ├── index.js
 │       ├── Layout.js
-│       ├── reportWebVitals.js
-│       ├── router.js
-│       └── setupTests.js
+│       └── router.js
 │
-├── .dockerignore
-├── .gitignore   
-├── pyproject.toml
-├── README.md
-└── uv.lock
+├── pyproject.toml            # Python dependencies
+├── uv.lock                   # uv lock file
+├── package-lock.json         # frontend lock file if generated at root
+├── .gitignore
+└── README.md
 ```
 ## Files ignored by Git
 The project uses `.gitignore` to exclude virtual environments, environment
@@ -99,6 +148,18 @@ npm install
 ollama list
 ollama pull llama3.2:1b
 ollama run llama3.2:1b
+```
+
+4.Builds FAISS indexes (Required before first use)
+ - for all agents. 
+```
+cd diplomaProject/api
+uv run python -m retrieval.ingest --all
+```
+- for a single agent.
+```
+cd diplomaProject/api
+uv run python -m retrieval.ingest --agent hr
 ```
 
 ## Running the Application
