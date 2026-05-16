@@ -2,6 +2,7 @@ import '../../App.css';
 import "milligram";
 import {useState, useEffect} from "react";
 import {Link} from "react-router-dom";
+import {Modal} from 'antd';
 
 const DocumentsManagement = () => {
 
@@ -16,7 +17,7 @@ const DocumentsManagement = () => {
     const API_URL = "http://localhost:8000";
 
 
-    const handleSubmit = async (e) => {
+    const uploadDocument = async (e) => {
         e.preventDefault();
 
         if (!folderName.trim()) {
@@ -49,13 +50,31 @@ const DocumentsManagement = () => {
             const data = await res.json();
 
             if (!res.ok) {
-                throw new Error(data.detail || "Upload failed");
+                throw new Error(
+                    data.detail || "Upload failed"
+                );
             }
 
             setFolderName("");
             setFiles([]);
 
+            Modal.success({
+                title: "Upload completed",
+                content: `${files.length} document(s) uploaded successfully.`,
+
+                className: "milligram-confirm",
+                style: {
+                    border: "2px solid #9b4dca",
+                    borderRadius: "6px"
+                },
+
+                okButtonProps: {
+                    className: "button button-outline"
+                }
+            });
+
         } catch (err) {
+
             console.error("Upload error:", err);
 
             setError(
@@ -63,6 +82,21 @@ const DocumentsManagement = () => {
                     ? err.message
                     : "Unknown upload error"
             );
+
+            Modal.error({
+                title: "Upload failed",
+                content:
+                    err instanceof Error
+                        ? err.message
+                        : "Unknown upload error",
+
+                className: "milligram-confirm",
+
+                okButtonProps: {
+                    className: "button"
+                }
+            });
+
         } finally {
             setLoading(false);
         }
@@ -136,48 +170,66 @@ const DocumentsManagement = () => {
     };
 
 
-    const deleteDocument = async (filename) => {
+    const deleteDocument = (filename) => {
 
-        const confirmed = window.confirm(
-            `Delete ${filename}?`
-        );
+        Modal.confirm({
+            title: "Are you sure you want to remove this document?",
+            className: "milligram-confirm",
+            okText: "Yes",
+            cancelText: "No",
+            okType: "danger",
+            style: {
+                border: "2px solid #9b4dca",
+                borderRadius: "6px"
+            },
 
-        if (!confirmed) {
-            return;
-        }
+            okButtonProps: {
+                className: "button button-outline"
+            },
 
-        try {
+            cancelButtonProps: {
+                className: "button"
+            },
 
-            const res = await fetch(
-                `/documents/${folderName}/${filename}`,
-                {
-                    method: "DELETE",
+            async onOk() {
+
+                try {
+
+                    const res = await fetch(
+                        `/documents/${folderName}/${filename}`,
+                        {
+                            method: "DELETE",
+                        }
+                    );
+
+                    const data = await res.json();
+
+                    if (!res.ok) {
+                        throw new Error(
+                            data.detail || "Delete failed"
+                        );
+                    }
+
+                    setDocuments((prev) =>
+                        prev.filter(
+                            (doc) => doc.filename !== filename
+                        )
+                    );
+
+                } catch (err) {
+
+                    console.error("Delete error:", err);
+
+                    setError(
+                        err instanceof Error
+                            ? err.message
+                            : "Unknown error"
+                    );
+
+                    throw err;
                 }
-            );
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(
-                    data.detail || "Delete failed"
-                );
-            }
-
-            setDocuments((prev) =>
-                prev.filter(
-                    (doc) => doc.filename !== filename
-                )
-            );
-
-        } catch (err) {
-            console.error("Delete error:", err);
-
-            setError(
-                err instanceof Error
-                    ? err.message
-                    : "Unknown error"
-            );
-        }
+            },
+        });
     };
 
     const clearAll = () => {
@@ -269,8 +321,8 @@ const DocumentsManagement = () => {
                             }
                             placeholder="Enter folder name (new or existing)"
                         />
-                        <br />
-                        <form onSubmit={handleSubmit}>
+                        <br/>
+                        <form onSubmit={uploadDocument}>
                             <fieldset>
                                 <label htmlFor="fileField">
                                     Select documents

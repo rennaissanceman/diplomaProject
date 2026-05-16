@@ -2,6 +2,7 @@ import '../../App.css';
 import "milligram";
 import {Link} from "react-router-dom";
 import {useState, useEffect} from "react";
+import {Modal} from 'antd';
 
 const AgentsConfiguration = () => {
     const [mode, setMode] = useState(null);
@@ -62,10 +63,12 @@ const AgentsConfiguration = () => {
                 body: JSON.stringify(formData),
             });
 
+            const data = await res.json();
+
             if (!res.ok) {
-                const error = await res.json();
-                alert(JSON.stringify(error));
-                return;
+                throw new Error(
+                    data.detail || "Failed to create agent"
+                );
             }
 
             setFormData({
@@ -78,9 +81,41 @@ const AgentsConfiguration = () => {
                 connected_agent_ids: []
             });
 
+            Modal.success({
+                title: "Agent created",
+                content: `Agent "${data.name || formData.name}" has been created successfully.`,
+
+                className: "milligram-confirm",
+                style: {
+                    border: "2px solid #9b4dca",
+                    borderRadius: "6px"
+                },
+
+                okButtonProps: {
+                    className: "button button-outline"
+                }
+            });
+
         } catch (err) {
             console.error(err);
-            alert("Error creating agent");
+
+            Modal.error({
+                title: "Error",
+                content:
+                    err instanceof Error
+                        ? err.message
+                        : "Error creating agent",
+
+                className: "milligram-confirm",
+                style: {
+                    border: "2px solid #9b4dca",
+                    borderRadius: "6px"
+                },
+
+                okButtonProps: {
+                    className: "button button-outline"
+                }
+            });
         }
     };
 
@@ -99,10 +134,12 @@ const AgentsConfiguration = () => {
                 method: "PATCH",
             });
 
+            const data = await res.json();
+
             if (!res.ok) {
-                const error = await res.json();
-                alert(error.detail || "Error");
-                return;
+                throw new Error(
+                    data.detail || "Error updating agent status"
+                );
             }
 
             setAgents(prev =>
@@ -113,12 +150,46 @@ const AgentsConfiguration = () => {
                 )
             );
 
+            Modal.success({
+                title: "Agent status updated",
+                content: `Agent "${agent.name}" has been ${
+                    agent.active ? "deactivated" : "activated"
+                } successfully.`,
+
+                className: "milligram-confirm",
+                style: {
+                    border: "2px solid #9b4dca",
+                    borderRadius: "6px"
+                },
+
+                okButtonProps: {
+                    className: "button button-outline"
+                }
+            });
+
             setSelectedAgentId(null);
             setMode(null);
 
         } catch (err) {
             console.error(err);
-            alert("Error updating agent status");
+
+            Modal.error({
+                title: "Error",
+                content:
+                    err instanceof Error
+                        ? err.message
+                        : "Error updating agent status",
+
+                className: "milligram-confirm",
+                style: {
+                    border: "2px solid #9b4dca",
+                    borderRadius: "6px"
+                },
+
+                okButtonProps: {
+                    className: "button button-outline"
+                }
+            });
         }
     };
 
@@ -138,10 +209,12 @@ const AgentsConfiguration = () => {
                 }),
             });
 
+            const data = await res.json();
+
             if (!res.ok) {
-                const error = await res.json();
-                alert(error.detail);
-                return;
+                throw new Error(
+                    data.detail || "Failed to update agent"
+                );
             }
 
             setAgents(prev =>
@@ -152,12 +225,44 @@ const AgentsConfiguration = () => {
                 )
             );
 
+            Modal.success({
+                title: "Agent updated",
+                content: `Agent "${formData.name}" has been updated successfully.`,
+
+                className: "milligram-confirm",
+                style: {
+                    border: "2px solid #9b4dca",
+                    borderRadius: "6px"
+                },
+
+                okButtonProps: {
+                    className: "button button-outline"
+                }
+            });
+
             setMode(null);
             setSelectedAgentId(null);
 
         } catch (err) {
             console.error(err);
-            alert("Error updating agent");
+
+            Modal.error({
+                title: "Error",
+                content:
+                    err instanceof Error
+                        ? err.message
+                        : "Error updating agent",
+
+                className: "milligram-confirm",
+                style: {
+                    border: "2px solid #9b4dca",
+                    borderRadius: "6px"
+                },
+
+                okButtonProps: {
+                    className: "button button-outline"
+                }
+            });
         }
     };
 
