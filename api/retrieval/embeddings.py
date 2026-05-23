@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 
-# Force Hugging Face / Transformers offline mode before loading SentenceTransformer
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_DATASETS_OFFLINE"] = "1"
@@ -31,7 +30,8 @@ def get_embedding_model(
 
     if not model_path.exists():
         raise FileNotFoundError(
-            f"Local embedding model not found: {model_path}"
+            f"Local embedding model not found: {model_path}. "
+            f"Run: uv run python download_models.py"
         )
 
     return SentenceTransformer(
