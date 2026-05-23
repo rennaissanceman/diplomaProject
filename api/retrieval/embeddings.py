@@ -1,14 +1,43 @@
+import os
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
+
+# Force Hugging Face / Transformers offline mode before loading SentenceTransformer
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+
 from sentence_transformers import SentenceTransformer
 
-DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+API_DIR = Path(__file__).resolve().parents[1]
+
+DEFAULT_EMBEDDING_MODEL = str(
+    API_DIR
+    / "local_models"
+    / "embedding"
+    / "all-MiniLM-L6-v2"
+)
 
 
 @lru_cache(maxsize=1)
-def get_embedding_model(model_name: str = DEFAULT_EMBEDDING_MODEL) -> SentenceTransformer:
-    return SentenceTransformer(model_name)
+def get_embedding_model(
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
+) -> SentenceTransformer:
+    model_path = Path(model_name).resolve()
+
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Local embedding model not found: {model_path}"
+        )
+
+    return SentenceTransformer(
+        str(model_path),
+        local_files_only=True,
+    )
 
 
 def embed_texts(
@@ -48,7 +77,6 @@ def cosine_similarity(
     if query_embedding.size == 0 or document_embeddings.size == 0:
         return np.array([], dtype=np.float32)
 
-    # embeddings są już znormalizowane, więc iloczyn skalarny = cosine similarity
     scores = np.matmul(document_embeddings, query_embedding)
 
     return scores.astype(np.float32)
