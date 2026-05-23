@@ -5,6 +5,10 @@ import { useEffect, useState } from "react";
 const AiAssistant = () => {
     const [agents, setAgents] = useState([]);
     const [selectedAgent, setSelectedAgent] = useState("");
+
+    const [models, setModels] = useState([]);
+    const [selectedModel, setSelectedModel] = useState("");
+
     const [question, setQuestion] = useState("");
     const [response, setResponse] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -17,6 +21,26 @@ const AiAssistant = () => {
             .catch((err) => {
                 console.error("Error fetching agents:", err);
                 setError("Cannot load agents.");
+            });
+    }, []);
+
+    useEffect(() => {
+        fetch("/llm-models")
+            .then((res) => res.json())
+            .then((data) => {
+                setModels(data);
+
+                const defaultModel = data.find((model) => model.default);
+
+                if (defaultModel) {
+                    setSelectedModel(defaultModel.id);
+                } else if (data.length > 0) {
+                    setSelectedModel(data[0].id);
+                }
+            })
+            .catch((err) => {
+                console.error("Error fetching LLM models:", err);
+                setError("Cannot load LLM models.");
             });
     }, []);
 
@@ -35,6 +59,7 @@ const AiAssistant = () => {
                 body: JSON.stringify({
                     question: question,
                     selected_agent: selectedAgent || null,
+                    language_model: selectedModel || null,
                 }),
             });
 
@@ -74,6 +99,20 @@ const AiAssistant = () => {
                         ))}
                     </select>
 
+                    <label htmlFor="modelField">Choose language model</label>
+                    <select
+                        id="modelField"
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                    >
+                        <option value="">-- Select language model --</option>
+                        {models.map((model) => (
+                            <option key={model.id} value={model.id}>
+                                {model.label} ({model.id})
+                            </option>
+                        ))}
+                    </select>
+
                     <label htmlFor="commentField">Question</label>
                     <textarea
                         id="commentField"
@@ -104,6 +143,7 @@ const AiAssistant = () => {
                     <div style={{ border: "1px solid #ddd", padding: "1rem", marginBottom: "1rem" }}>
                         <p><strong>Agent:</strong> {response.agent}</p>
                         <p><strong>Agent type:</strong> {debug?.agent_type || "unknown"}</p>
+                        <p><strong>Language model:</strong> {debug?.language_model || selectedModel || "unknown"}</p>
                         <p>{response.answer}</p>
                     </div>
 

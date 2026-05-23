@@ -10,6 +10,7 @@ from datetime import datetime
 from db import Base, engine, get_db
 from router import route_with_langgraph
 from runtime import run_agent_with_debug
+from ollama_client import list_llm_models
 from models import Agent, AgentLink
 from schemas import (
     AgentCreate,
@@ -117,6 +118,10 @@ def create_supervisor_links(
     ]
     db.add_all(links)
     db.commit()
+
+@app.get("/llm-models")
+def get_llm_models():
+    return list_llm_models()
 
 @app.get("/healthcheck")
 def healthcheck():
@@ -271,7 +276,12 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
             detail="Agent not found"
         )
 
-    answer, sources, debug = run_agent_with_debug(payload.question, agent, db)
+    answer, sources, debug = run_agent_with_debug(
+        question=payload.question,
+        agent=agent,
+        db=db,
+        language_model=payload.language_model,
+    )
 
     rag_metrics_store.append({
         "retrieval_time_ms": debug.retrieval_time_ms,
@@ -279,6 +289,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         "total_time_ms": debug.total_time_ms,
         "confidence": debug.confidence,
         "agent_type": debug.agent_type,
+        "language_model": debug.language_model,
         "chunks": len(debug.chunks)
     })
 
@@ -288,6 +299,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         sources=sources,
         debug=ChatDebugResponse(
             agent_type=debug.agent_type,
+            language_model=debug.language_model,
             retrieval_time_ms=debug.retrieval_time_ms,
             generation_time_ms=debug.generation_time_ms,
             total_time_ms=debug.total_time_ms,

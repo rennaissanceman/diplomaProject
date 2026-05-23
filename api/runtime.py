@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from models import Agent, AgentLink
-from ollama_client import generate_answer
+#from ollama_client import generate_answer
+from ollama_client import DEFAULT_OLLAMA_MODEL, generate_answer, validate_model_name
 from prompts.builders import build_specialist_prompt, build_supervisor_prompt
 from retrieval.retriever import retrieve_chunks_for_folder
 from retrieval.types import AgentRagAnswer, AgentRetrievalResult, RetrievedChunk
@@ -13,6 +14,7 @@ SPECIALIST_TOP_K = 3
 @dataclass(frozen=True)
 class RuntimeDebugInfo:
     agent_type: str
+    language_model: str
     retrieval_time_ms: float
     generation_time_ms: float
     total_time_ms: float
@@ -111,6 +113,7 @@ def run_specialist_rag_answer(
     question: str,
     agent: Agent,
     top_k: int = SPECIALIST_TOP_K,
+    language_model: str | None = None,
 ) -> AgentRagAnswer:
     retrieval_result = run_specialist_retrieval_only(
         question=question,
@@ -139,7 +142,7 @@ def run_specialist_rag_answer(
     print(prompt)
     print("========== END SPECIALIST PROMPT ==========\n")
 
-    answer = generate_answer(prompt)
+    answer = generate_answer(prompt, model_name=language_model)
 
     print("\n========== SPECIALIST ANSWER ==========")
     print(answer)
@@ -154,10 +157,15 @@ def run_specialist_rag_answer(
     )
 
 
-def run_specialist_agent(question: str, agent: Agent) -> tuple[str, list[str]]:
+def run_specialist_agent(
+    question: str,
+    agent: Agent,
+    language_model: str | None = None,
+) -> tuple[str, list[str]]:
     result = run_specialist_rag_answer(
         question=question,
         agent=agent,
+        language_model=language_model,
     )
 
     return result.answer, result.sources
@@ -167,6 +175,7 @@ def run_supervisor_agent(
     question: str,
     agent: Agent,
     db: Session,
+    language_model: str | None = None,
 ) -> tuple[str, list[str]]:
     links = (
         db.query(AgentLink)
@@ -204,9 +213,9 @@ def run_supervisor_agent(
         child_result = run_specialist_rag_answer(
             question=question,
             agent=child,
+            language_model=language_model,
         )
 
-        # 🔥 NOWY FILTER (KLUCZOWA ZMIANA)
         if (
             child_result.has_answer
             and not is_unknown_answer(child_result.answer)
@@ -236,7 +245,7 @@ def run_supervisor_agent(
         child_answers=child_answers,
     )
 
-    final_answer = generate_answer(prompt)
+    final_answer = generate_answer(prompt, model_name=language_model)
     unique_sources = _unique_sources_from_chunks(collected_sources)
 
     return final_answer, unique_sources
@@ -275,7 +284,9 @@ def run_agent_with_debug(
     question: str,
     agent: Agent,
     db: Session,
+    language_model: str | None = None,
 ) -> tuple[str, list[str], RuntimeDebugInfo]:
+    selected_language_model = validate_model_name(language_model)
     total_start = time.perf_counter()
 
     if agent.agent_type == "supervisor":
@@ -284,12 +295,14 @@ def run_agent_with_debug(
             question=question,
             agent=agent,
             db=db,
+            language_model=selected_language_model,
         )
         generation_time_ms = round((time.perf_counter() - generation_start) * 1000, 2)
         total_time_ms = round((time.perf_counter() - total_start) * 1000, 2)
 
         debug = RuntimeDebugInfo(
             agent_type="supervisor",
+            language_model=selected_language_model,
             retrieval_time_ms=0.0,
             generation_time_ms=generation_time_ms,
             total_time_ms=total_time_ms,
@@ -311,6 +324,7 @@ def run_agent_with_debug(
 
         debug = RuntimeDebugInfo(
             agent_type="specialist",
+            language_model=selected_language_model,
             retrieval_time_ms=retrieval_time_ms,
             generation_time_ms=0.0,
             total_time_ms=total_time_ms,
@@ -329,12 +343,13 @@ def run_agent_with_debug(
     )
 
     generation_start = time.perf_counter()
-    answer = generate_answer(prompt)
+    answer = generate_answer(prompt, model_name=selected_language_model)
     generation_time_ms = round((time.perf_counter() - generation_start) * 1000, 2)
     total_time_ms = round((time.perf_counter() - total_start) * 1000, 2)
 
     debug = RuntimeDebugInfo(
         agent_type="specialist",
+        language_model=selected_language_model,
         retrieval_time_ms=retrieval_time_ms,
         generation_time_ms=generation_time_ms,
         total_time_ms=total_time_ms,
