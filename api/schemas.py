@@ -41,6 +41,7 @@ class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1)
     selected_agent: Optional[str] = Field(default=None, min_length=1, max_length=100)
     language_model: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    use_reranker: bool = False
 
 
 class RetrievedChunkResponse(BaseModel):
@@ -56,7 +57,9 @@ class RetrievedChunkResponse(BaseModel):
 class ChatDebugResponse(BaseModel):
     agent_type: str
     language_model: str
+    use_reranker: bool
     retrieval_time_ms: float
+    reranking_time_ms: float
     generation_time_ms: float
     total_time_ms: float
     confidence: float

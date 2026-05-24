@@ -10,6 +10,7 @@ from retrieval.vector_store import (
     save_vector_index,
     search_vector_index,
 )
+from retrieval.reranker import DEFAULT_RERANKER_CANDIDATES, rerank_chunks
 
 DEFAULT_TOP_K = 3
 MIN_SIMILARITY_SCORE = 0.25
@@ -81,6 +82,8 @@ def retrieve_chunks_for_folder(
     top_k: int = DEFAULT_TOP_K,
     agent_name: str | None = None,
     min_score: float = MIN_SIMILARITY_SCORE,
+    use_reranker: bool = False,
+    reranker_candidates: int = DEFAULT_RERANKER_CANDIDATES,
 ) -> list[RetrievedChunk]:
     index_dir = get_agent_index_dir(
         docs_path=folder,
@@ -91,9 +94,23 @@ def retrieve_chunks_for_folder(
     if not index_exists(index_dir):
         return []
 
-    return search_vector_index(
+    vector_top_k = reranker_candidates if use_reranker else top_k
+
+    vector_results = search_vector_index(
         question=question,
         index_dir=index_dir,
+        top_k=vector_top_k,
+        min_score=0.0 if use_reranker else min_score,
+    )
+
+    if not vector_results:
+        return []
+
+    if not use_reranker:
+        return vector_results[:top_k]
+
+    return rerank_chunks(
+        question=question,
+        chunks=vector_results,
         top_k=top_k,
-        min_score=min_score,
     )

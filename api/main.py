@@ -7,6 +7,7 @@ from sqlalchemy import or_
 from starlette.middleware.cors import CORSMiddleware
 from mimetypes import guess_type
 from datetime import datetime
+
 from db import Base, engine, get_db
 from router import route_with_langgraph
 from runtime import run_agent_with_debug
@@ -21,7 +22,7 @@ from schemas import (
     ChatDebugResponse,
     RetrievedChunkResponse,
 )
-import models
+
 import logging
 import re
 import shutil
@@ -33,10 +34,13 @@ logging.basicConfig(
     format="%(levelname)s | %(name)s | %(message)s"
 )
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     yield
+
+
 app = FastAPI(
     title="Diploma project",
     lifespan=lifespan,
@@ -44,7 +48,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000","http://localhost:5173"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,7 +56,8 @@ app.add_middleware(
 
 DATA_DIR = Path("data").resolve()
 
-def to_agent_response(agent:Agent) -> AgentResponse:
+
+def to_agent_response(agent: Agent) -> AgentResponse:
     connected_agent_ids = [
         link.child_agent_id
         for link in getattr(agent, "supervisor_links", [])
@@ -70,10 +75,11 @@ def to_agent_response(agent:Agent) -> AgentResponse:
         connected_agent_ids=connected_agent_ids,
     )
 
+
 def validate_connected_agents(
-        db:Session,
-        connected_agent_ids: list[int],
-        supervisor_id:int,
+    db: Session,
+    connected_agent_ids: list[int],
+    supervisor_id: int,
 ) -> None:
     if not connected_agent_ids:
         return
@@ -90,13 +96,14 @@ def validate_connected_agents(
         if child.id == supervisor_id:
             raise HTTPException(
                 status_code=400,
-                detail="Supervisor cannot be linked to itself"
+                detail="Supervisor cannot be linked to itself",
             )
 
+
 def create_supervisor_links(
-        db: Session,
-        supervisor_id: int,
-        connected_agent_ids: list[int],
+    db: Session,
+    supervisor_id: int,
+    connected_agent_ids: list[int],
 ) -> None:
     if not connected_agent_ids:
         return
@@ -112,44 +119,51 @@ def create_supervisor_links(
             supervisor_agent_id=supervisor_id,
             child_agent_id=child_id,
             active=True,
-            sort_order= index +1,
+            sort_order=index + 1,
         )
         for index, child_id in enumerate(connected_agent_ids)
     ]
+
     db.add_all(links)
     db.commit()
+
 
 @app.get("/llm-models")
 def get_llm_models():
     return list_llm_models()
 
+
 @app.get("/healthcheck")
 def healthcheck():
     return {"status": "ok"}
+
 
 @app.get("/agents", response_model=list[AgentResponse])
 def list_agents(db: Session = Depends(get_db)):
     agents = db.query(Agent).order_by(Agent.id.asc()).all()
     return [to_agent_response(agent) for agent in agents]
 
+
 @app.post("/agents", response_model=AgentResponse)
 def create_agent(payload: AgentCreate, db: Session = Depends(get_db)):
     existing_agent = db.query(Agent).filter(Agent.name == payload.name).first()
+
     if existing_agent:
         raise HTTPException(
             status_code=400,
-            detail="Agent already exists"
+            detail="Agent already exists",
         )
+
     if payload.agent_type == "specialist" and payload.connected_agent_ids:
         raise HTTPException(
             status_code=400,
-            detail="Only supervisor agents can have connected agents"
+            detail="Only supervisor agents can have connected agents",
         )
 
     if payload.agent_type == "supervisor" and not payload.connected_agent_ids:
         raise HTTPException(
             status_code=400,
-            detail="Supervisor agent must have at least one connected agent"
+            detail="Supervisor agent must have at least one connected agent",
         )
 
     agent = Agent(
@@ -177,6 +191,7 @@ def create_agent(payload: AgentCreate, db: Session = Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent.id).first()
     return to_agent_response(agent)
 
+
 @app.patch("/agents/{agent_id}/deactivate")
 def deactivate_agent(agent_id: int, db: Session = Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
@@ -184,7 +199,7 @@ def deactivate_agent(agent_id: int, db: Session = Depends(get_db)):
     if not agent:
         raise HTTPException(
             status_code=404,
-            detail="Agent not found"
+            detail="Agent not found",
         )
 
     agent.active = False
@@ -192,15 +207,16 @@ def deactivate_agent(agent_id: int, db: Session = Depends(get_db)):
     db.query(AgentLink).filter(
         or_(
             AgentLink.supervisor_agent_id == agent.id,
-            AgentLink.child_agent_id == agent.id
+            AgentLink.child_agent_id == agent.id,
         )
     ).update({"active": False}, synchronize_session=False)
 
     db.commit()
 
     return {
-        "message": f"Agent '{agent.name}' was deactivated successfully"
+        "message": f"Agent '{agent.name}' was deactivated successfully",
     }
+
 
 @app.patch("/agents/{agent_id}/activate")
 def activate_agent(agent_id: int, db: Session = Depends(get_db)):
@@ -209,7 +225,7 @@ def activate_agent(agent_id: int, db: Session = Depends(get_db)):
     if not agent:
         raise HTTPException(
             status_code=404,
-            detail="Agent not found"
+            detail="Agent not found",
         )
 
     agent.active = True
@@ -217,7 +233,7 @@ def activate_agent(agent_id: int, db: Session = Depends(get_db)):
     db.query(AgentLink).filter(
         or_(
             AgentLink.supervisor_agent_id == agent.id,
-            AgentLink.child_agent_id == agent.id
+            AgentLink.child_agent_id == agent.id,
         )
     ).update({"active": True}, synchronize_session=False)
 
@@ -225,7 +241,10 @@ def activate_agent(agent_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(agent)
 
-    return {"message": f"Agent '{agent.name}' was activated successfully"}
+    return {
+        "message": f"Agent '{agent.name}' was activated successfully",
+    }
+
 
 @app.patch("/agents/{agent_id}")
 def update_agent(agent_id: int, data: AgentUpdateSafe, db: Session = Depends(get_db)):
@@ -234,7 +253,7 @@ def update_agent(agent_id: int, data: AgentUpdateSafe, db: Session = Depends(get
     if not agent:
         raise HTTPException(
             status_code=404,
-            detail="Agent not found"
+            detail="Agent not found",
         )
 
     agent.name = data.name
@@ -251,11 +270,13 @@ def update_agent(agent_id: int, data: AgentUpdateSafe, db: Session = Depends(get
             "id": agent.id,
             "name": agent.name,
             "description": agent.description,
-            "prompt": agent.prompt
-        }
+            "prompt": agent.prompt,
+        },
     }
 
+
 rag_metrics_store = []
+
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, db: Session = Depends(get_db)):
@@ -270,10 +291,11 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         .filter(Agent.name == agent_name, Agent.active.is_(True))
         .first()
     )
+
     if not agent:
         raise HTTPException(
             status_code=404,
-            detail="Agent not found"
+            detail="Agent not found",
         )
 
     answer, sources, debug = run_agent_with_debug(
@@ -281,17 +303,22 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         agent=agent,
         db=db,
         language_model=payload.language_model,
+        use_reranker=payload.use_reranker,
     )
 
-    rag_metrics_store.append({
-        "retrieval_time_ms": debug.retrieval_time_ms,
-        "generation_time_ms": debug.generation_time_ms,
-        "total_time_ms": debug.total_time_ms,
-        "confidence": debug.confidence,
-        "agent_type": debug.agent_type,
-        "language_model": debug.language_model,
-        "chunks": len(debug.chunks)
-    })
+    rag_metrics_store.append(
+        {
+            "retrieval_time_ms": debug.retrieval_time_ms,
+            "reranking_time_ms": debug.reranking_time_ms,
+            "generation_time_ms": debug.generation_time_ms,
+            "total_time_ms": debug.total_time_ms,
+            "confidence": debug.confidence,
+            "agent_type": debug.agent_type,
+            "language_model": debug.language_model,
+            "use_reranker": debug.use_reranker,
+            "chunks": len(debug.chunks),
+        }
+    )
 
     return ChatResponse(
         agent=agent.name,
@@ -300,7 +327,9 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         debug=ChatDebugResponse(
             agent_type=debug.agent_type,
             language_model=debug.language_model,
+            use_reranker=debug.use_reranker,
             retrieval_time_ms=debug.retrieval_time_ms,
+            reranking_time_ms=debug.reranking_time_ms,
             generation_time_ms=debug.generation_time_ms,
             total_time_ms=debug.total_time_ms,
             confidence=debug.confidence,
@@ -322,6 +351,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
 
+
 @app.post("/documents/upload")
 async def upload_documents(
     folder_name: str = Form(...),
@@ -330,7 +360,7 @@ async def upload_documents(
     if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
         raise HTTPException(
             status_code=400,
-            detail="Invalid folder name"
+            detail="Invalid folder name",
         )
 
     target_folder = (DATA_DIR / folder_name).resolve()
@@ -338,7 +368,7 @@ async def upload_documents(
     if DATA_DIR not in target_folder.parents and target_folder != DATA_DIR:
         raise HTTPException(
             status_code=400,
-            detail="Invalid folder path"
+            detail="Invalid folder path",
         )
 
     target_folder.mkdir(parents=True, exist_ok=True)
@@ -354,7 +384,7 @@ async def upload_documents(
         if ext not in ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type: {ext}"
+                detail=f"Unsupported file type: {ext}",
             )
 
         file_path = target_folder / file.filename
@@ -370,13 +400,13 @@ async def upload_documents(
         "files": saved_files,
     }
 
+
 @app.get("/documents/{folder_name}")
 async def get_documents(folder_name: str):
-
     if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
         raise HTTPException(
             status_code=400,
-            detail="Invalid folder name"
+            detail="Invalid folder name",
         )
 
     target_folder = (DATA_DIR / folder_name).resolve()
@@ -384,34 +414,35 @@ async def get_documents(folder_name: str):
     if DATA_DIR not in target_folder.parents and target_folder != DATA_DIR:
         raise HTTPException(
             status_code=400,
-            detail="Invalid folder path"
+            detail="Invalid folder path",
         )
 
     if not target_folder.exists():
         raise HTTPException(
             status_code=404,
-            detail="Folder not found"
+            detail="Folder not found",
         )
 
     documents = []
 
     for file_path in target_folder.iterdir():
-
         if not file_path.is_file():
             continue
 
-        documents.append({
-            "filename": file_path.name,
-            "extension": file_path.suffix.lower(),
-            "size_bytes": file_path.stat().st_size,
-            "modified_at": datetime.fromtimestamp(
-                os.path.getmtime(file_path)
-            ).isoformat()
-        })
+        documents.append(
+            {
+                "filename": file_path.name,
+                "extension": file_path.suffix.lower(),
+                "size_bytes": file_path.stat().st_size,
+                "modified_at": datetime.fromtimestamp(
+                    os.path.getmtime(file_path)
+                ).isoformat(),
+            }
+        )
 
     documents.sort(
-        key=lambda x: x["modified_at"],
-        reverse=True
+        key=lambda item: item["modified_at"],
+        reverse=True,
     )
 
     return {
@@ -419,16 +450,17 @@ async def get_documents(folder_name: str):
         "documents": documents,
     }
 
+
 @app.get("/documents/{folder_name}/{filename}")
 async def get_document(
     folder_name: str,
     filename: str,
-    download: bool = False
+    download: bool = False,
 ):
     if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
         raise HTTPException(
-            400,
-            "Invalid folder name"
+            status_code=400,
+            detail="Invalid folder name",
         )
 
     target_folder = (DATA_DIR / folder_name).resolve()
@@ -436,8 +468,14 @@ async def get_document(
 
     if not file_path.exists():
         raise HTTPException(
-            404,
-            "File not found"
+            status_code=404,
+            detail="File not found",
+        )
+
+    if target_folder not in file_path.parents:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid filename",
         )
 
     mime_type, _ = guess_type(file_path)
@@ -446,25 +484,25 @@ async def get_document(
         return FileResponse(
             path=file_path,
             media_type="application/octet-stream",
-            headers={"Content-Disposition": "attachment"}
+            headers={"Content-Disposition": "attachment"},
         )
 
     return FileResponse(
         path=file_path,
         media_type=mime_type or "text/plain",
-        headers={"Content-Disposition": "inline"}
+        headers={"Content-Disposition": "inline"},
     )
+
 
 @app.delete("/documents/{folder_name}/{filename}")
 async def delete_document(
     folder_name: str,
     filename: str,
 ):
-
     if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
         raise HTTPException(
             status_code=400,
-            detail="Invalid folder name"
+            detail="Invalid folder name",
         )
 
     target_folder = (DATA_DIR / folder_name).resolve()
@@ -472,7 +510,7 @@ async def delete_document(
     if DATA_DIR not in target_folder.parents and target_folder != DATA_DIR:
         raise HTTPException(
             status_code=400,
-            detail="Invalid folder path"
+            detail="Invalid folder path",
         )
 
     file_path = (target_folder / filename).resolve()
@@ -480,13 +518,13 @@ async def delete_document(
     if target_folder not in file_path.parents:
         raise HTTPException(
             status_code=400,
-            detail="Invalid filename"
+            detail="Invalid filename",
         )
 
     if not file_path.exists():
         raise HTTPException(
             status_code=404,
-            detail="File not found"
+            detail="File not found",
         )
 
     file_path.unlink()
@@ -497,23 +535,24 @@ async def delete_document(
         "filename": filename,
     }
 
+
 @app.get("/documents")
 async def list_document_folders():
-
     if not DATA_DIR.exists():
         return {"folders": []}
 
     folders = []
 
     for path in DATA_DIR.iterdir():
-
         if path.is_dir():
-            folders.append({
-                "name": path.name
-            })
+            folders.append(
+                {
+                    "name": path.name,
+                }
+            )
 
     return {
-        "folders": folders
+        "folders": folders,
     }
 
 
@@ -522,19 +561,34 @@ def get_rag_metrics():
     if not rag_metrics_store:
         return {
             "avg_retrieval_time_ms": 0,
+            "avg_reranking_time_ms": 0,
             "avg_generation_time_ms": 0,
             "avg_total_time_ms": 0,
             "avg_confidence": 0,
-            "requests": 0
+            "requests": 0,
+            "reranker_requests": 0,
         }
 
     n = len(rag_metrics_store)
 
     return {
-        "avg_retrieval_time_ms": sum(m["retrieval_time_ms"] for m in rag_metrics_store) / n,
-        "avg_generation_time_ms": sum(m["generation_time_ms"] for m in rag_metrics_store) / n,
-        "avg_total_time_ms": sum(m["total_time_ms"] for m in rag_metrics_store) / n,
-        "avg_confidence": sum(m["confidence"] for m in rag_metrics_store) / n,
-        "requests": n
+        "avg_retrieval_time_ms": sum(
+            item["retrieval_time_ms"] for item in rag_metrics_store
+        ) / n,
+        "avg_reranking_time_ms": sum(
+            item["reranking_time_ms"] for item in rag_metrics_store
+        ) / n,
+        "avg_generation_time_ms": sum(
+            item["generation_time_ms"] for item in rag_metrics_store
+        ) / n,
+        "avg_total_time_ms": sum(
+            item["total_time_ms"] for item in rag_metrics_store
+        ) / n,
+        "avg_confidence": sum(
+            item["confidence"] for item in rag_metrics_store
+        ) / n,
+        "requests": n,
+        "reranker_requests": sum(
+            1 for item in rag_metrics_store if item["use_reranker"]
+        ),
     }
-

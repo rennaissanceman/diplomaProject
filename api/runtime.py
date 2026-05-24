@@ -1,21 +1,26 @@
 import time
 from dataclasses import dataclass
+
 from sqlalchemy.orm import Session
 
 from models import Agent, AgentLink
-#from ollama_client import generate_answer
-from ollama_client import DEFAULT_OLLAMA_MODEL, generate_answer, validate_model_name
+from ollama_client import generate_answer, validate_model_name
 from prompts.builders import build_specialist_prompt, build_supervisor_prompt
+from retrieval.reranker import DEFAULT_RERANKER_CANDIDATES
 from retrieval.retriever import retrieve_chunks_for_folder
 from retrieval.types import AgentRagAnswer, AgentRetrievalResult, RetrievedChunk
 
 
 SPECIALIST_TOP_K = 3
+
+
 @dataclass(frozen=True)
 class RuntimeDebugInfo:
     agent_type: str
     language_model: str
+    use_reranker: bool
     retrieval_time_ms: float
+    reranking_time_ms: float
     generation_time_ms: float
     total_time_ms: float
     confidence: float
@@ -24,6 +29,7 @@ class RuntimeDebugInfo:
 
 def is_unknown_answer(answer: str) -> bool:
     normalized = answer.strip().lower()
+
     return (
         "i don't know based on the provided documents" in normalized
         or "i don't know based on the provided agent answers" in normalized
@@ -67,7 +73,6 @@ def _format_retrieved_chunks(chunks: list[RetrievedChunk]) -> str:
 
 def _format_agent_result_for_supervisor(result: AgentRagAnswer) -> str:
     chunk_context = _format_retrieved_chunks(result.chunks)
-
     sources = ", ".join(result.sources) if result.sources else "none"
 
     return f"""
@@ -87,12 +92,15 @@ def run_specialist_retrieval_only(
     question: str,
     agent: Agent,
     top_k: int = SPECIALIST_TOP_K,
+    use_reranker: bool = False,
 ) -> AgentRetrievalResult:
     relevant_chunks = retrieve_chunks_for_folder(
         question=question,
         folder=agent.docs_path,
         top_k=top_k,
         agent_name=agent.name,
+        use_reranker=use_reranker,
+        reranker_candidates=DEFAULT_RERANKER_CANDIDATES,
     )
 
     sources = _unique_sources_from_chunks(
@@ -114,11 +122,15 @@ def run_specialist_rag_answer(
     agent: Agent,
     top_k: int = SPECIALIST_TOP_K,
     language_model: str | None = None,
+    use_reranker: bool = False,
 ) -> AgentRagAnswer:
+    selected_language_model = validate_model_name(language_model)
+
     retrieval_result = run_specialist_retrieval_only(
         question=question,
         agent=agent,
         top_k=top_k,
+        use_reranker=use_reranker,
     )
 
     if not retrieval_result.has_context:
@@ -142,7 +154,10 @@ def run_specialist_rag_answer(
     print(prompt)
     print("========== END SPECIALIST PROMPT ==========\n")
 
-    answer = generate_answer(prompt, model_name=language_model)
+    answer = generate_answer(
+        prompt,
+        model_name=selected_language_model,
+    )
 
     print("\n========== SPECIALIST ANSWER ==========")
     print(answer)
@@ -161,11 +176,13 @@ def run_specialist_agent(
     question: str,
     agent: Agent,
     language_model: str | None = None,
+    use_reranker: bool = False,
 ) -> tuple[str, list[str]]:
     result = run_specialist_rag_answer(
         question=question,
         agent=agent,
         language_model=language_model,
+        use_reranker=use_reranker,
     )
 
     return result.answer, result.sources
@@ -176,7 +193,10 @@ def run_supervisor_agent(
     agent: Agent,
     db: Session,
     language_model: str | None = None,
+    use_reranker: bool = False,
 ) -> tuple[str, list[str]]:
+    selected_language_model = validate_model_name(language_model)
+
     links = (
         db.query(AgentLink)
         .filter(
@@ -213,7 +233,8 @@ def run_supervisor_agent(
         child_result = run_specialist_rag_answer(
             question=question,
             agent=child,
-            language_model=language_model,
+            language_model=selected_language_model,
+            use_reranker=use_reranker,
         )
 
         if (
@@ -223,7 +244,10 @@ def run_supervisor_agent(
         ):
             useful_child_results.append(child_result)
             collected_sources.extend(
-                [f"{child_result.agent_name}:{source}" for source in child_result.sources]
+                [
+                    f"{child_result.agent_name}:{source}"
+                    for source in child_result.sources
+                ]
             )
 
     if not useful_child_results:
@@ -245,7 +269,11 @@ def run_supervisor_agent(
         child_answers=child_answers,
     )
 
-    final_answer = generate_answer(prompt, model_name=language_model)
+    final_answer = generate_answer(
+        prompt,
+        model_name=selected_language_model,
+    )
+
     unique_sources = _unique_sources_from_chunks(collected_sources)
 
     return final_answer, unique_sources
@@ -255,17 +283,25 @@ def _run_agent(
     question: str,
     agent: Agent,
     db: Session,
+    language_model: str | None = None,
+    use_reranker: bool = False,
 ) -> tuple[str, list[str]]:
+    selected_language_model = validate_model_name(language_model)
+
     if agent.agent_type == "supervisor":
         return run_supervisor_agent(
             question=question,
             agent=agent,
             db=db,
+            language_model=selected_language_model,
+            use_reranker=use_reranker,
         )
 
     return run_specialist_agent(
         question=question,
         agent=agent,
+        language_model=selected_language_model,
+        use_reranker=use_reranker,
     )
 
 
@@ -273,37 +309,48 @@ def run_agent(
     question: str,
     agent: Agent,
     db: Session,
+    language_model: str | None = None,
+    use_reranker: bool = False,
 ) -> tuple[str, list[str]]:
     return _run_agent(
         question=question,
         agent=agent,
         db=db,
+        language_model=language_model,
+        use_reranker=use_reranker,
     )
+
 
 def run_agent_with_debug(
     question: str,
     agent: Agent,
     db: Session,
     language_model: str | None = None,
+    use_reranker: bool = False,
 ) -> tuple[str, list[str], RuntimeDebugInfo]:
     selected_language_model = validate_model_name(language_model)
     total_start = time.perf_counter()
 
     if agent.agent_type == "supervisor":
         generation_start = time.perf_counter()
+
         answer, sources = run_supervisor_agent(
             question=question,
             agent=agent,
             db=db,
             language_model=selected_language_model,
+            use_reranker=use_reranker,
         )
+
         generation_time_ms = round((time.perf_counter() - generation_start) * 1000, 2)
         total_time_ms = round((time.perf_counter() - total_start) * 1000, 2)
 
         debug = RuntimeDebugInfo(
             agent_type="supervisor",
             language_model=selected_language_model,
+            use_reranker=use_reranker,
             retrieval_time_ms=0.0,
+            reranking_time_ms=0.0,
             generation_time_ms=generation_time_ms,
             total_time_ms=total_time_ms,
             confidence=0.0,
@@ -313,11 +360,15 @@ def run_agent_with_debug(
         return answer, sources, debug
 
     retrieval_start = time.perf_counter()
+
     retrieval_result = run_specialist_retrieval_only(
         question=question,
         agent=agent,
+        use_reranker=use_reranker,
     )
+
     retrieval_time_ms = round((time.perf_counter() - retrieval_start) * 1000, 2)
+    reranking_time_ms = retrieval_time_ms if use_reranker else 0.0
 
     if not retrieval_result.has_context:
         total_time_ms = round((time.perf_counter() - total_start) * 1000, 2)
@@ -325,7 +376,9 @@ def run_agent_with_debug(
         debug = RuntimeDebugInfo(
             agent_type="specialist",
             language_model=selected_language_model,
+            use_reranker=use_reranker,
             retrieval_time_ms=retrieval_time_ms,
+            reranking_time_ms=reranking_time_ms,
             generation_time_ms=0.0,
             total_time_ms=total_time_ms,
             confidence=0.0,
@@ -343,14 +396,21 @@ def run_agent_with_debug(
     )
 
     generation_start = time.perf_counter()
-    answer = generate_answer(prompt, model_name=selected_language_model)
+
+    answer = generate_answer(
+        prompt,
+        model_name=selected_language_model,
+    )
+
     generation_time_ms = round((time.perf_counter() - generation_start) * 1000, 2)
     total_time_ms = round((time.perf_counter() - total_start) * 1000, 2)
 
     debug = RuntimeDebugInfo(
         agent_type="specialist",
         language_model=selected_language_model,
+        use_reranker=use_reranker,
         retrieval_time_ms=retrieval_time_ms,
+        reranking_time_ms=reranking_time_ms,
         generation_time_ms=generation_time_ms,
         total_time_ms=total_time_ms,
         confidence=retrieval_result.confidence,

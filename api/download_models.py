@@ -6,31 +6,25 @@ from huggingface_hub import snapshot_download
 
 BASE_DIR = Path(__file__).resolve().parent
 
-MODEL_NAME = "all-MiniLM-L6-v2"
-MODEL_REPO_ID = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL_REPO_ID = "sentence-transformers/all-MiniLM-L6-v2"
 
-MODEL_DIR = (
+RERANKER_MODEL_NAME = "qwen3-reranker-0.6b-seq-cls"
+RERANKER_MODEL_REPO_ID = "tomaarsen/Qwen3-Reranker-0.6B-seq-cls"
+
+EMBEDDING_MODEL_DIR = (
     BASE_DIR
     / "local_models"
     / "embedding"
-    / MODEL_NAME
+    / EMBEDDING_MODEL_NAME
 )
 
-REQUIRED_FILES = [
-    "config.json",
-    "modules.json",
-    "sentence_bert_config.json",
-    "tokenizer.json",
-    "tokenizer_config.json",
-    "model.safetensors",
-]
-
-
-def model_exists() -> bool:
-    return MODEL_DIR.exists() and all(
-        (MODEL_DIR / file_name).exists()
-        for file_name in REQUIRED_FILES
-    )
+RERANKER_MODEL_DIR = (
+    BASE_DIR
+    / "local_models"
+    / "reranker"
+    / RERANKER_MODEL_NAME
+)
 
 
 def allow_online_download() -> None:
@@ -39,29 +33,44 @@ def allow_online_download() -> None:
     os.environ.pop("HF_DATASETS_OFFLINE", None)
 
 
-def download_model() -> None:
-    allow_online_download()
+def model_exists(model_dir: Path) -> bool:
+    return model_dir.exists() and any(model_dir.iterdir())
 
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"[DOWNLOAD] {MODEL_REPO_ID}")
-    print(f"[TARGET]   {MODEL_DIR}")
+def download_snapshot(repo_id: str, model_dir: Path) -> None:
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"[DOWNLOAD] {repo_id}")
+    print(f"[TARGET]   {model_dir}")
 
     snapshot_download(
-        repo_id=MODEL_REPO_ID,
-        local_dir=MODEL_DIR,
+        repo_id=repo_id,
+        local_dir=model_dir,
     )
 
-    print(f"[OK] Downloaded model to: {MODEL_DIR}")
+    print(f"[OK] Downloaded model to: {model_dir}")
 
 
 def main() -> None:
-    if model_exists():
-        print(f"[OK] Local model already exists: {MODEL_DIR}")
-        return
+    allow_online_download()
 
-    print(f"[MISSING] Local model incomplete or missing: {MODEL_DIR}")
-    download_model()
+    if model_exists(EMBEDDING_MODEL_DIR):
+        print(f"[OK] Local embedding model already exists: {EMBEDDING_MODEL_DIR}")
+    else:
+        print(f"[MISSING] Local embedding model missing: {EMBEDDING_MODEL_DIR}")
+        download_snapshot(
+            repo_id=EMBEDDING_MODEL_REPO_ID,
+            model_dir=EMBEDDING_MODEL_DIR,
+        )
+
+    if model_exists(RERANKER_MODEL_DIR):
+        print(f"[OK] Local reranker model already exists: {RERANKER_MODEL_DIR}")
+    else:
+        print(f"[MISSING] Local reranker model missing: {RERANKER_MODEL_DIR}")
+        download_snapshot(
+            repo_id=RERANKER_MODEL_REPO_ID,
+            model_dir=RERANKER_MODEL_DIR,
+        )
 
 
 if __name__ == "__main__":

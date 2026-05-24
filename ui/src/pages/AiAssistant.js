@@ -9,6 +9,8 @@ const AiAssistant = () => {
     const [models, setModels] = useState([]);
     const [selectedModel, setSelectedModel] = useState("");
 
+    const [useReranker, setUseReranker] = useState(false);
+
     const [question, setQuestion] = useState("");
     const [response, setResponse] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -60,6 +62,7 @@ const AiAssistant = () => {
                     question: question,
                     selected_agent: selectedAgent || null,
                     language_model: selectedModel || null,
+                    use_reranker: useReranker,
                 }),
             });
 
@@ -113,6 +116,16 @@ const AiAssistant = () => {
                         ))}
                     </select>
 
+                    <label htmlFor="rerankerField">
+                        <input
+                            id="rerankerField"
+                            type="checkbox"
+                            checked={useReranker}
+                            onChange={(e) => setUseReranker(e.target.checked)}
+                        />
+                        Use Qwen Reranker
+                    </label>
+
                     <label htmlFor="commentField">Question</label>
                     <textarea
                         id="commentField"
@@ -144,6 +157,7 @@ const AiAssistant = () => {
                         <p><strong>Agent:</strong> {response.agent}</p>
                         <p><strong>Agent type:</strong> {debug?.agent_type || "unknown"}</p>
                         <p><strong>Language model:</strong> {debug?.language_model || selectedModel || "unknown"}</p>
+                        <p><strong>Qwen Reranker:</strong> {debug?.use_reranker ? "enabled" : "disabled"}</p>
                         <p>{response.answer}</p>
                     </div>
 
@@ -155,8 +169,16 @@ const AiAssistant = () => {
                                 <td>{debug?.confidence ?? "n/a"}</td>
                             </tr>
                             <tr>
+                                <td><strong>Reranker</strong></td>
+                                <td>{debug?.use_reranker ? "enabled" : "disabled"}</td>
+                            </tr>
+                            <tr>
                                 <td><strong>Retrieval time</strong></td>
                                 <td>{debug?.retrieval_time_ms ?? "n/a"} ms</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Reranking time</strong></td>
+                                <td>{debug?.reranking_time_ms ?? "n/a"} ms</td>
                             </tr>
                             <tr>
                                 <td><strong>Generation time</strong></td>
