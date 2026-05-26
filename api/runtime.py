@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from models import Agent, AgentLink
 from ollama_client import generate_answer, validate_model_name
-from prompts.builders import build_specialist_prompt, build_supervisor_prompt
+from prompts.builders import build_specialist_prompt
 from retrieval.reranker import DEFAULT_RERANKER_CANDIDATES
 from retrieval.retriever import retrieve_chunks_for_folder
 from retrieval.types import AgentRagAnswer, AgentRetrievalResult, RetrievedChunk
@@ -33,6 +33,10 @@ def is_unknown_answer(answer: str) -> bool:
     return (
         "i don't know based on the provided documents" in normalized
         or "i don't know based on the provided agent answers" in normalized
+        or "i do not know based on the provided documents" in normalized
+        or "i do not know based on the provided agent answers" in normalized
+        or "i don't know based on the provided child agent answers" in normalized
+        or "i do not know based on the provided child agent answers" in normalized
     )
 
 
@@ -69,23 +73,6 @@ def _format_retrieved_chunks(chunks: list[RetrievedChunk]) -> str:
         )
         for item in chunks
     )
-
-
-def _format_agent_result_for_supervisor(result: AgentRagAnswer) -> str:
-    chunk_context = _format_retrieved_chunks(result.chunks)
-    sources = ", ".join(result.sources) if result.sources else "none"
-
-    return f"""
-[agent: {result.agent_name}]
-[confidence: {result.confidence:.4f}]
-[sources: {sources}]
-
-Answer:
-{result.answer}
-
-Retrieved evidence:
-{chunk_context}
-""".strip()
 
 
 def run_specialist_retrieval_only(
@@ -136,7 +123,7 @@ def run_specialist_rag_answer(
     if not retrieval_result.has_context:
         return AgentRagAnswer(
             agent_name=agent.name,
-            answer="I don't know based on the provided documents",
+            answer="I don't know based on the provided documents.",
             chunks=[],
             sources=[],
             confidence=0.0,
@@ -151,6 +138,7 @@ def run_specialist_rag_answer(
     )
 
     print("\n========== SPECIALIST PROMPT ==========")
+    print("AGENT:", agent.name)
     print(prompt)
     print("========== END SPECIALIST PROMPT ==========\n")
 
@@ -160,6 +148,7 @@ def run_specialist_rag_answer(
     )
 
     print("\n========== SPECIALIST ANSWER ==========")
+    print("AGENT:", agent.name)
     print(answer)
     print("========== END SPECIALIST ANSWER ==========\n")
 
@@ -207,19 +196,32 @@ def run_supervisor_agent(
         .all()
     )
 
+    print("\n========== SUPERVISOR DEBUG ==========")
+    print("SUPERVISOR:", agent.name)
+    print("SUPERVISOR ID:", agent.id)
+    print("QUESTION:", question)
+    print("LINKS:", [(link.child_agent_id, link.active) for link in links])
+
     if not links:
-        return "No connected agents are configured for this supervisor", []
+        print("NO LINKS CONFIGURED")
+        print("========== END SUPERVISOR DEBUG ==========\n")
+        return "No connected agents are configured for this supervisor.", []
+
+    child_ids = [link.child_agent_id for link in links]
 
     child_agents = (
         db.query(Agent)
         .filter(
-            Agent.id.in_([link.child_agent_id for link in links]),
+            Agent.id.in_(child_ids),
             Agent.active.is_(True),
         )
         .all()
     )
 
     child_map = {child.id: child for child in child_agents}
+
+    print("CHILD IDS:", child_ids)
+    print("CHILD AGENTS:", [child.name for child in child_agents])
 
     useful_child_results: list[AgentRagAnswer] = []
     collected_sources: list[str] = []
@@ -228,7 +230,14 @@ def run_supervisor_agent(
         child = child_map.get(link.child_agent_id)
 
         if not child:
+            print("MISSING OR INACTIVE CHILD AGENT:", link.child_agent_id)
             continue
+
+        print("\n--- CALLING CHILD AGENT ---")
+        print("CHILD ID:", child.id)
+        print("CHILD NAME:", child.name)
+        print("CHILD TYPE:", child.agent_type)
+        print("CHILD DOCS PATH:", child.docs_path)
 
         child_result = run_specialist_rag_answer(
             question=question,
@@ -237,11 +246,13 @@ def run_supervisor_agent(
             use_reranker=use_reranker,
         )
 
-        if (
-            child_result.has_answer
-            and not is_unknown_answer(child_result.answer)
-            and child_result.confidence >= 0.45
-        ):
+        print("CHILD RESULT AGENT:", child_result.agent_name)
+        print("CHILD RESULT ANSWER:", child_result.answer)
+        print("CHILD RESULT CONFIDENCE:", child_result.confidence)
+        print("CHILD RESULT SOURCES:", child_result.sources)
+        print("CHILD RESULT CHUNKS:", len(child_result.chunks))
+
+        if child_result.chunks:
             useful_child_results.append(child_result)
             collected_sources.extend(
                 [
@@ -249,6 +260,12 @@ def run_supervisor_agent(
                     for source in child_result.sources
                 ]
             )
+            print("CHILD ACCEPTED BY SUPERVISOR")
+        else:
+            print("CHILD REJECTED BY SUPERVISOR")
+
+    print("USEFUL CHILD RESULTS:", len(useful_child_results))
+    print("========== END SUPERVISOR DEBUG ==========\n")
 
     if not useful_child_results:
         return "I don't know based on the provided agent answers.", []
@@ -258,21 +275,29 @@ def run_supervisor_agent(
         reverse=True,
     )
 
-    child_answers = "\n\n---\n\n".join(
-        _format_agent_result_for_supervisor(result)
+    known_child_answers = [
+        f"{result.agent_name}: {result.answer}"
         for result in useful_child_results
-    )
+        if not is_unknown_answer(result.answer)
+    ]
 
-    prompt = build_supervisor_prompt(
-        agent_prompt=agent.prompt,
-        question=question,
-        child_answers=child_answers,
-    )
+    if known_child_answers:
+        final_answer = "\n\n".join(known_child_answers)
+    else:
+        evidence_summaries = [
+            f"{result.agent_name}: found {len(result.chunks)} relevant chunks in {', '.join(result.sources)}"
+            for result in useful_child_results
+            if result.chunks
+        ]
 
-    final_answer = generate_answer(
-        prompt,
-        model_name=selected_language_model,
-    )
+        if evidence_summaries:
+            final_answer = "\n\n".join(evidence_summaries)
+        else:
+            final_answer = "I don't know based on the provided agent answers."
+
+    print("\n========== SUPERVISOR ANSWER ==========")
+    print(final_answer)
+    print("========== END SUPERVISOR ANSWER ==========\n")
 
     unique_sources = _unique_sources_from_chunks(collected_sources)
 
@@ -385,7 +410,7 @@ def run_agent_with_debug(
             chunks=[],
         )
 
-        return "I don't know based on the provided documents", [], debug
+        return "I don't know based on the provided documents.", [], debug
 
     context = _format_retrieved_chunks(retrieval_result.chunks)
 
@@ -395,12 +420,22 @@ def run_agent_with_debug(
         context=context,
     )
 
+    print("\n========== SPECIALIST PROMPT ==========")
+    print("AGENT:", agent.name)
+    print(prompt)
+    print("========== END SPECIALIST PROMPT ==========\n")
+
     generation_start = time.perf_counter()
 
     answer = generate_answer(
         prompt,
         model_name=selected_language_model,
     )
+
+    print("\n========== SPECIALIST ANSWER ==========")
+    print("AGENT:", agent.name)
+    print(answer)
+    print("========== END SPECIALIST ANSWER ==========\n")
 
     generation_time_ms = round((time.perf_counter() - generation_start) * 1000, 2)
     total_time_ms = round((time.perf_counter() - total_start) * 1000, 2)

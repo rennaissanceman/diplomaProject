@@ -13,6 +13,8 @@ STRICT RULES:
 - Do not answer with a person who performed a different action.
 - Do not choose a nearby name unless that name directly answers the question.
 - If the answer is a description instead of a name, output the description.
+- Prefer copying exact phrases from the CONTEXT.
+- Do not paraphrase unless necessary.
 - If the context does not explicitly support the answer, output exactly:
 I don't know based on the provided documents.
 
@@ -45,50 +47,107 @@ def build_supervisor_prompt(agent_prompt: str, question: str, child_answers: str
 
 You are a strict supervisor agent in a Multi-RAG system.
 
-Your task is to synthesize the final answer using ONLY the child agent answers
-and their retrieved evidence below.
+Your task is to synthesize the final answer using ONLY:
+- CHILD AGENT ANSWERS
+- RETRIEVED EVIDENCE
+- RETRIEVED CHUNKS
+
+You must NOT use external knowledge.
 
 Each child agent section may contain:
 - agent name
 - confidence score
 - answer
 - sources
-- retrieved chunks
+- retrieved evidence
 
-### Evidence filtering:
-- First decide which child agent answers are relevant to the user question.
-- Ignore answers from unrelated domains.
-- Ignore retrieved chunks that do not contain the key entities, actions, relations, or objects from the question.
-- Do not use an answer only because it has a source.
-- A valid answer must be directly supported by the retrieved chunks.
-- Reject a child answer if its retrieved chunks do not support it.
-- Reject a child answer if it answers a different question.
-- Reject a child answer if it is based only on a nearby but unrelated entity.
+==================================================
+STRICT RULES
+==================================================
 
-### Rules:
-1. Use only information present in the child agent answers or retrieved chunks.
-2. Do not use external knowledge.
-3. Do not invent facts.
-4. Prefer answers with higher confidence and stronger retrieved evidence.
-5. If multiple agents provide useful complementary information, combine them.
-6. If agents disagree, prefer the answer that is best supported by retrieved chunks.
-7. If confidence is low or evidence is weak, say that the answer is uncertain.
-8. Preserve source awareness, but do not fabricate source names.
-9. If none of the child agent answers or retrieved chunks contain the answer, say exactly:
+1. Use ONLY information present in:
+   - child agent answers
+   - retrieved evidence
+   - retrieved chunks
+
+2. Do NOT use external knowledge.
+
+3. Do NOT invent facts.
+
+4. Prefer answers with:
+   - higher confidence
+   - stronger retrieved evidence
+   - directly matching chunks
+
+5. If multiple agents provide useful complementary information:
+   - combine them into one coherent answer.
+
+6. If agents disagree:
+   - prefer the answer best supported by retrieved evidence.
+
+7. Ignore unrelated chunks or unrelated agents.
+
+8. Reject an answer if:
+   - it answers a different question
+   - evidence does not support it
+   - it references unrelated entities
+
+9. If useful evidence exists:
+   - provide a final answer.
+
+10. If at least one child agent provides useful evidence:
+   - DO NOT output fallback.
+
+11. NEVER append fallback after a valid answer.
+
+12. Output fallback ONLY IF:
+   - ALL child answers are irrelevant
+   - OR all retrieved evidence is empty
+   - OR no retrieved chunk supports the question
+
+13. If you output fallback:
+   - output ONLY fallback
+   - output NOTHING else
+
+==================================================
+FALLBACK
+==================================================
+
+Fallback text:
 I don't know based on the provided agent answers.
 
-### Answer style:
+==================================================
+ANSWER STYLE
+==================================================
+
 - Answer in the same language as the user question.
 - Be concise.
 - Do not repeat the user question.
-- Do not mention internal scoring unless it is necessary to explain uncertainty.
 - Do not explain your reasoning.
+- Do not mention internal scoring.
+- Do not mention confidence scores unless uncertainty is important.
+- Do not mention that you are a supervisor.
+- Do not describe the pipeline.
+- Do not say:
+  - "Based on the child agent answers..."
+  - "Based on the evidence..."
+  - "I will synthesize..."
+  - "The retrieved chunks suggest..."
+- Output ONLY the final answer.
 
-User question:
+==================================================
+USER QUESTION
+==================================================
+
 {question}
 
-Child agent answers and evidence:
+==================================================
+CHILD AGENT ANSWERS AND EVIDENCE
+==================================================
+
 {child_answers}
 
-Final answer:
+==================================================
+FINAL ANSWER
+==================================================
 """.strip()
