@@ -2,6 +2,7 @@ import math
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Iterable
 
 from sentence_transformers import CrossEncoder
 
@@ -35,6 +36,34 @@ def _sigmoid(value: float) -> float:
         return 0.0 if value < 0 else 1.0
 
 
+def _to_float_scores(raw_scores: Iterable) -> list[float]:
+    """
+    CrossEncoder.predict() can return:
+    - list[float],
+    - numpy.ndarray,
+    - list[list[float]],
+    - numpy.ndarray with shape (n, 1).
+
+    This helper normalizes output to list[float].
+    """
+    normalized_scores: list[float] = []
+
+    for raw_score in raw_scores:
+        if isinstance(raw_score, (list, tuple)):
+            normalized_scores.append(float(raw_score[0]))
+        elif hasattr(raw_score, "tolist"):
+            converted = raw_score.tolist()
+
+            if isinstance(converted, list):
+                normalized_scores.append(float(converted[0]))
+            else:
+                normalized_scores.append(float(converted))
+        else:
+            normalized_scores.append(float(raw_score))
+
+    return normalized_scores
+
+
 @lru_cache(maxsize=1)
 def get_reranker() -> CrossEncoder:
     _force_offline_mode()
@@ -56,6 +85,9 @@ def rerank_chunks(
     chunks: list[RetrievedChunk],
     top_k: int = DEFAULT_RERANKER_TOP_K,
 ) -> list[RetrievedChunk]:
+    if not question.strip():
+        return []
+
     if not chunks:
         return []
 
@@ -70,16 +102,19 @@ def rerank_chunks(
     ]
 
     raw_scores = reranker.predict(pairs)
+    float_scores = _to_float_scores(raw_scores)
 
     scored_items: list[tuple[float, RetrievedChunk]] = []
 
-    for item, raw_score in zip(chunks, raw_scores):
+    for item, raw_score in zip(chunks, float_scores):
+        normalized_score = round(_sigmoid(raw_score), 4)
+
         scored_items.append(
             (
-                float(raw_score),
+                normalized_score,
                 RetrievedChunk(
                     chunk=item.chunk,
-                    score=item.score,
+                    score=normalized_score,
                 ),
             )
         )

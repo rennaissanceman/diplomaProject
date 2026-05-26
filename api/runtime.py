@@ -27,6 +27,14 @@ class RuntimeDebugInfo:
     chunks: list[RetrievedChunk]
 
 
+@dataclass(frozen=True)
+class SupervisorRunResult:
+    answer: str
+    sources: list[str]
+    chunks: list[RetrievedChunk]
+    confidence: float
+
+
 def is_unknown_answer(answer: str) -> bool:
     normalized = answer.strip().lower()
 
@@ -62,6 +70,22 @@ def _calculate_confidence(chunks: list[RetrievedChunk]) -> float:
     return round((best_score * 0.7) + (average_score * 0.3), 4)
 
 
+def _calculate_supervisor_confidence(results: list[AgentRagAnswer]) -> float:
+    known_results = [
+        result
+        for result in results
+        if result.chunks and not is_unknown_answer(result.answer)
+    ]
+
+    if not known_results:
+        return 0.0
+
+    return round(
+        sum(result.confidence for result in known_results) / len(known_results),
+        4,
+    )
+
+
 def _format_retrieved_chunks(chunks: list[RetrievedChunk]) -> str:
     return "\n\n---\n\n".join(
         (
@@ -73,6 +97,44 @@ def _format_retrieved_chunks(chunks: list[RetrievedChunk]) -> str:
         )
         for item in chunks
     )
+
+
+def _build_child_question(question: str, child: Agent) -> str:
+    """
+    Very simple first version of query decomposition.
+
+    Purpose:
+    - reduce cross-agent confusion,
+    - avoid sending the full multi-domain question to every child,
+    - improve retrieval quality for supervisor agents.
+
+    This can later be replaced by LLM-based decomposition.
+    """
+    normalized_question = question.lower()
+    child_name = child.name.lower()
+    child_docs_path = (child.docs_path or "").lower()
+
+    if child_name == "harrypotter" or "hogwart" in child_docs_path:
+        if "harry potter" in normalized_question:
+            return question.replace(
+                "and Lord of the Rings",
+                "",
+            ).replace(
+                "and lord of the rings",
+                "",
+            ).strip()
+
+    if child_name == "frodo" or "lotr" in child_docs_path:
+        if "lord of the rings" in normalized_question:
+            return question.replace(
+                "Harry Potter and",
+                "",
+            ).replace(
+                "harry potter and",
+                "",
+            ).strip()
+
+    return question
 
 
 def run_specialist_retrieval_only(
@@ -139,6 +201,7 @@ def run_specialist_rag_answer(
 
     print("\n========== SPECIALIST PROMPT ==========")
     print("AGENT:", agent.name)
+    print("QUESTION:", question)
     print(prompt)
     print("========== END SPECIALIST PROMPT ==========\n")
 
@@ -177,13 +240,13 @@ def run_specialist_agent(
     return result.answer, result.sources
 
 
-def run_supervisor_agent(
+def run_supervisor_agent_with_details(
     question: str,
     agent: Agent,
     db: Session,
     language_model: str | None = None,
     use_reranker: bool = False,
-) -> tuple[str, list[str]]:
+) -> SupervisorRunResult:
     selected_language_model = validate_model_name(language_model)
 
     links = (
@@ -205,7 +268,13 @@ def run_supervisor_agent(
     if not links:
         print("NO LINKS CONFIGURED")
         print("========== END SUPERVISOR DEBUG ==========\n")
-        return "No connected agents are configured for this supervisor.", []
+
+        return SupervisorRunResult(
+            answer="No connected agents are configured for this supervisor.",
+            sources=[],
+            chunks=[],
+            confidence=0.0,
+        )
 
     child_ids = [link.child_agent_id for link in links]
 
@@ -225,6 +294,7 @@ def run_supervisor_agent(
 
     useful_child_results: list[AgentRagAnswer] = []
     collected_sources: list[str] = []
+    collected_chunks: list[RetrievedChunk] = []
 
     for link in links:
         child = child_map.get(link.child_agent_id)
@@ -233,14 +303,20 @@ def run_supervisor_agent(
             print("MISSING OR INACTIVE CHILD AGENT:", link.child_agent_id)
             continue
 
+        child_question = _build_child_question(
+            question=question,
+            child=child,
+        )
+
         print("\n--- CALLING CHILD AGENT ---")
         print("CHILD ID:", child.id)
         print("CHILD NAME:", child.name)
         print("CHILD TYPE:", child.agent_type)
         print("CHILD DOCS PATH:", child.docs_path)
+        print("CHILD QUESTION:", child_question)
 
         child_result = run_specialist_rag_answer(
-            question=question,
+            question=child_question,
             agent=child,
             language_model=selected_language_model,
             use_reranker=use_reranker,
@@ -252,8 +328,9 @@ def run_supervisor_agent(
         print("CHILD RESULT SOURCES:", child_result.sources)
         print("CHILD RESULT CHUNKS:", len(child_result.chunks))
 
-        if child_result.chunks:
+        if child_result.chunks and not is_unknown_answer(child_result.answer):
             useful_child_results.append(child_result)
+            collected_chunks.extend(child_result.chunks)
             collected_sources.extend(
                 [
                     f"{child_result.agent_name}:{source}"
@@ -268,7 +345,12 @@ def run_supervisor_agent(
     print("========== END SUPERVISOR DEBUG ==========\n")
 
     if not useful_child_results:
-        return "I don't know based on the provided agent answers.", []
+        return SupervisorRunResult(
+            answer="I don't know based on the provided agent answers.",
+            sources=[],
+            chunks=collected_chunks,
+            confidence=0.0,
+        )
 
     useful_child_results.sort(
         key=lambda item: item.confidence,
@@ -276,7 +358,7 @@ def run_supervisor_agent(
     )
 
     known_child_answers = [
-        f"{result.agent_name}: {result.answer}"
+        f"{result.agent_name}: {result.answer.strip()}"
         for result in useful_child_results
         if not is_unknown_answer(result.answer)
     ]
@@ -284,24 +366,39 @@ def run_supervisor_agent(
     if known_child_answers:
         final_answer = "\n\n".join(known_child_answers)
     else:
-        evidence_summaries = [
-            f"{result.agent_name}: found {len(result.chunks)} relevant chunks in {', '.join(result.sources)}"
-            for result in useful_child_results
-            if result.chunks
-        ]
-
-        if evidence_summaries:
-            final_answer = "\n\n".join(evidence_summaries)
-        else:
-            final_answer = "I don't know based on the provided agent answers."
+        final_answer = "I don't know based on the provided agent answers."
 
     print("\n========== SUPERVISOR ANSWER ==========")
     print(final_answer)
     print("========== END SUPERVISOR ANSWER ==========\n")
 
     unique_sources = _unique_sources_from_chunks(collected_sources)
+    supervisor_confidence = _calculate_supervisor_confidence(useful_child_results)
 
-    return final_answer, unique_sources
+    return SupervisorRunResult(
+        answer=final_answer,
+        sources=unique_sources,
+        chunks=collected_chunks,
+        confidence=supervisor_confidence,
+    )
+
+
+def run_supervisor_agent(
+    question: str,
+    agent: Agent,
+    db: Session,
+    language_model: str | None = None,
+    use_reranker: bool = False,
+) -> tuple[str, list[str]]:
+    result = run_supervisor_agent_with_details(
+        question=question,
+        agent=agent,
+        db=db,
+        language_model=language_model,
+        use_reranker=use_reranker,
+    )
+
+    return result.answer, result.sources
 
 
 def _run_agent(
@@ -359,7 +456,7 @@ def run_agent_with_debug(
     if agent.agent_type == "supervisor":
         generation_start = time.perf_counter()
 
-        answer, sources = run_supervisor_agent(
+        supervisor_result = run_supervisor_agent_with_details(
             question=question,
             agent=agent,
             db=db,
@@ -378,11 +475,11 @@ def run_agent_with_debug(
             reranking_time_ms=0.0,
             generation_time_ms=generation_time_ms,
             total_time_ms=total_time_ms,
-            confidence=0.0,
-            chunks=[],
+            confidence=supervisor_result.confidence,
+            chunks=supervisor_result.chunks,
         )
 
-        return answer, sources, debug
+        return supervisor_result.answer, supervisor_result.sources, debug
 
     retrieval_start = time.perf_counter()
 
@@ -422,6 +519,7 @@ def run_agent_with_debug(
 
     print("\n========== SPECIALIST PROMPT ==========")
     print("AGENT:", agent.name)
+    print("QUESTION:", question)
     print(prompt)
     print("========== END SPECIALIST PROMPT ==========\n")
 

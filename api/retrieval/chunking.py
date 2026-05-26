@@ -1,7 +1,7 @@
 from retrieval.types import DocumentChunk, SourceDocument
 
-DEFAULT_CHUNK_SIZE = 700
-DEFAULT_CHUNK_OVERLAP = 120
+DEFAULT_CHUNK_SIZE = 1200
+DEFAULT_CHUNK_OVERLAP = 200
 
 
 def chunk_document(
