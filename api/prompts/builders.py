@@ -1,95 +1,51 @@
 def build_specialist_prompt(agent_prompt: str, question: str, context: str) -> str:
+    safe_agent_prompt = (agent_prompt or "").strip()
+
+    if not safe_agent_prompt:
+        safe_agent_prompt = "You are a specialist assistant."
+
     return f"""
 You are a controlled semantic QA engine.
 
-You must answer using ONLY the CONTEXT.
+AGENT ROLE:
+{safe_agent_prompt}
 
 TASK:
 Answer the USER QUESTION using only information supported by the CONTEXT.
 
-==================================================
-STRICT RULES
-==================================================
-
-1. Do NOT use external knowledge.
-
-2. Do NOT invent facts.
-
-3. Do NOT guess beyond the CONTEXT.
-
-4. If the answer is explicitly stated in the CONTEXT:
-   - extract the shortest correct answer.
-
-5. If the question asks about:
-   - people
-   - names
-   - characters
-   - heroes
-   - main figures
-   - important figures
-   - central figures
-
-   then:
-   - return the most central names from the CONTEXT
-   - prefer repeatedly mentioned characters
-   - ignore secondary or minor characters
-   - return at most 3 names
-
-6. If multiple relevant names clearly appear:
-   - return a short comma-separated list.
-
-7. Do NOT answer with:
-   - unrelated nearby entities
-   - random names from the CONTEXT
-   - characters performing unrelated actions
-
-8. Prefer exact phrases from the CONTEXT when possible.
-
-9. Light semantic inference is allowed ONLY IF:
-   - the answer is strongly supported by the CONTEXT.
-
-10. If the CONTEXT does not support the answer:
-output exactly:
+STRICT RULES:
+- Do not use external knowledge.
+- Do not invent facts.
+- Do not guess beyond the CONTEXT.
+- Read the USER QUESTION carefully before choosing the answer style.
+- If the question asks "who is", "what is", "describe", "explain", asks for an identity, definition, explanation, or description, answer with one short descriptive sentence supported by the CONTEXT.
+- If the question asks for a specific date, number, title, place, or single factual value, extract the shortest correct answer supported by the CONTEXT.
+- If the question asks "who are", "which characters", "list characters", "main characters", "heroes", "important figures", or clearly asks for multiple people, return the most relevant names from the CONTEXT as a short comma-separated list.
+- If the CONTEXT contains the answer, copy the relevant fact directly. Never refuse to answer a normal HR policy question.
+- Do not reduce a "who is" question to only a name if the CONTEXT contains a description of that person.
+- Do not answer with a person who performed a different action.
+- Do not choose a nearby name unless that name directly answers the question.
+- If the answer is not present in the CONTEXT, answer exactly:
 I don't know based on the provided documents.
 
-==================================================
-IMPORTANT EXAMPLE
-==================================================
-
-Context:
-"Harry asked Ron about the houses.
-Hermione Granger was whispering about spells."
-
-Question:
-"Who are the main characters?"
-
-Correct answer:
-Harry, Ron, Hermione Granger.
-
-Wrong answer:
-Hagrid.
-
-==================================================
-CONTEXT
-==================================================
-
+CONTEXT:
 {context}
 
-==================================================
-USER QUESTION
-==================================================
-
+USER QUESTION:
 {question}
 
-==================================================
-FINAL ANSWER ONLY
-==================================================
+FINAL ANSWER:
 """.strip()
 
 
 def build_supervisor_prompt(agent_prompt: str, question: str, child_answers: str) -> str:
+    safe_agent_prompt = (agent_prompt or "").strip()
+
+    if not safe_agent_prompt:
+        safe_agent_prompt = "You are a supervisor agent."
+
     return f"""
-{agent_prompt}
+{safe_agent_prompt}
 
 You are a strict supervisor agent in a Multi-RAG system.
 
@@ -128,18 +84,24 @@ STRICT RULES
    - evidence does not support them
    - they contain unsupported entities
 
-7. If multiple child agents provide useful complementary information:
+7. If the question asks "who is", "what is", "describe", "explain", asks for an identity, definition, explanation, or description:
+   - return one concise descriptive sentence if supported by evidence.
+
+8. If the question asks "who are", "which characters", "list characters", "main characters", "heroes", "important figures", or clearly asks for multiple people:
+   - return the most relevant names as a short comma-separated list.
+
+9. If multiple child agents provide useful complementary information:
    - combine them into one concise answer.
 
-8. If at least one child answer is useful:
+10. If at least one child answer is useful:
    - NEVER output fallback.
 
-9. Output fallback ONLY IF:
+11. Output fallback ONLY IF:
    - all child answers are irrelevant
    - OR all evidence is empty
    - OR no retrieved chunk supports the question
 
-10. If outputting fallback:
+12. If outputting fallback:
    - output ONLY fallback
    - output NOTHING else
 

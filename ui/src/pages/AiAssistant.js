@@ -16,10 +16,28 @@ const AiAssistant = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
 
+    const [adminAgent, setAdminAgent] = useState("");
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [adminLoading, setAdminLoading] = useState(false);
+    const [adminMessage, setAdminMessage] = useState("");
+    const [adminResult, setAdminResult] = useState(null);
+
     useEffect(() => {
         fetch("/agents")
             .then((res) => res.json())
-            .then((data) => setAgents(data))
+            .then((data) => {
+                setAgents(data);
+
+                const firstSpecialist = data.find(
+                    (agent) => agent.agent_type === "specialist"
+                );
+
+                if (firstSpecialist) {
+                    setAdminAgent(firstSpecialist.name);
+                } else if (data.length > 0) {
+                    setAdminAgent(data[0].name);
+                }
+            })
             .catch((err) => {
                 console.error("Error fetching agents:", err);
                 setError("Cannot load agents.");
@@ -81,8 +99,121 @@ const AiAssistant = () => {
         }
     };
 
+    const ingestAll = async () => {
+        setAdminLoading(true);
+        setAdminMessage("");
+        setAdminResult(null);
+
+        try {
+            const response = await fetch("/admin/ingest/all", {
+                method: "POST",
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || "Ingest all failed");
+            }
+
+            setAdminResult(data);
+            setAdminMessage("All indexes rebuilt successfully.");
+        } catch (err) {
+            console.error("Error rebuilding all indexes:", err);
+            setAdminMessage(err.message || "Unknown ingest error");
+        } finally {
+            setAdminLoading(false);
+        }
+    };
+
+    const ingestAgent = async (agentName) => {
+        if (!agentName) {
+            setAdminMessage("Select agent first.");
+            return;
+        }
+
+        setAdminLoading(true);
+        setAdminMessage("");
+        setAdminResult(null);
+
+        try {
+            const response = await fetch(
+                `/admin/ingest/agent/${encodeURIComponent(agentName)}`,
+                {
+                    method: "POST",
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || `Ingest failed for ${agentName}`);
+            }
+
+            setAdminResult(data);
+            setAdminMessage(`Index rebuilt successfully for ${agentName}.`);
+        } catch (err) {
+            console.error("Error rebuilding agent index:", err);
+            setAdminMessage(err.message || "Unknown ingest error");
+        } finally {
+            setAdminLoading(false);
+        }
+    };
+
+    const uploadDocument = async (agentName, file) => {
+        if (!agentName) {
+            setAdminMessage("Select agent first.");
+            return;
+        }
+
+        if (!file) {
+            setAdminMessage("Select document first.");
+            return;
+        }
+
+        setAdminLoading(true);
+        setAdminMessage("");
+        setAdminResult(null);
+
+        try {
+            const formData = new FormData();
+            formData.append("file", file);
+
+            const response = await fetch(
+                `/admin/documents/upload/${encodeURIComponent(agentName)}`,
+                {
+                    method: "POST",
+                    body: formData,
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || "Document upload failed");
+            }
+
+            setAdminResult(data);
+            setAdminMessage("Document uploaded and agent index rebuilt successfully.");
+            setSelectedFile(null);
+
+            const fileInput = document.getElementById("adminDocumentField");
+            if (fileInput) {
+                fileInput.value = "";
+            }
+        } catch (err) {
+            console.error("Error uploading document:", err);
+            setAdminMessage(err.message || "Unknown upload error");
+        } finally {
+            setAdminLoading(false);
+        }
+    };
+
     const debug = response?.debug;
     const chunks = debug?.chunks || [];
+
+    const specialistAgents = agents.filter(
+        (agent) => agent.agent_type === "specialist"
+    );
 
     return (
         <div className="container_main">
@@ -142,6 +273,85 @@ const AiAssistant = () => {
                     />
                 </fieldset>
             </form>
+
+            <div style={{ border: "1px solid #ddd", padding: "1rem", marginTop: "2rem" }}>
+                <h3>RAG Admin Panel</h3>
+
+                <p>
+                    Use this section to rebuild FAISS indexes or upload a new document
+                    and rebuild the selected specialist agent.
+                </p>
+
+                <button
+                    className="button"
+                    type="button"
+                    onClick={ingestAll}
+                    disabled={adminLoading}
+                >
+                    {adminLoading ? "PROCESSING..." : "Rebuild All Indexes"}
+                </button>
+
+                <hr />
+
+                <label htmlFor="adminAgentField">Choose specialist agent</label>
+                <select
+                    id="adminAgentField"
+                    value={adminAgent}
+                    onChange={(e) => setAdminAgent(e.target.value)}
+                    disabled={adminLoading}
+                >
+                    <option value="">-- Select specialist agent --</option>
+                    {specialistAgents.map((agent) => (
+                        <option key={agent.id} value={agent.name}>
+                            {agent.name}
+                        </option>
+                    ))}
+                </select>
+
+                <button
+                    className="button"
+                    type="button"
+                    onClick={() => ingestAgent(adminAgent)}
+                    disabled={adminLoading || !adminAgent}
+                >
+                    {adminLoading ? "PROCESSING..." : "Rebuild Selected Agent"}
+                </button>
+
+                <hr />
+
+                <label htmlFor="adminDocumentField">Upload document to selected agent</label>
+                <input
+                    id="adminDocumentField"
+                    type="file"
+                    accept=".txt,.md,.pdf"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    disabled={adminLoading}
+                />
+
+                <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => uploadDocument(adminAgent, selectedFile)}
+                    disabled={adminLoading || !adminAgent || !selectedFile}
+                >
+                    {adminLoading ? "PROCESSING..." : "Upload Document + Rebuild Agent"}
+                </button>
+
+                {adminMessage && (
+                    <div style={{ border: "1px solid #ddd", padding: "1rem", marginTop: "1rem" }}>
+                        <strong>Status:</strong> {adminMessage}
+                    </div>
+                )}
+
+                {adminResult && (
+                    <details style={{ marginTop: "1rem" }}>
+                        <summary>Admin operation result JSON</summary>
+                        <pre style={{ whiteSpace: "pre-wrap" }}>
+                            {JSON.stringify(adminResult, null, 2)}
+                        </pre>
+                    </details>
+                )}
+            </div>
 
             {error && (
                 <div style={{ border: "1px solid #c00", padding: "1rem", marginTop: "1rem" }}>

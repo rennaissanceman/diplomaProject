@@ -8,6 +8,12 @@ from starlette.middleware.cors import CORSMiddleware
 from mimetypes import guess_type
 from datetime import datetime
 
+from retrieval.ingest_service import (
+    ingest_all_agents,
+    ingest_agent_by_name,
+    ingest_agent,
+)
+
 from db import Base, engine, get_db
 from router import route_with_langgraph
 from runtime import run_agent_with_debug
@@ -55,6 +61,7 @@ app.add_middleware(
 )
 
 DATA_DIR = Path("data").resolve()
+ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
 
 
 def to_agent_response(agent: Agent) -> AgentResponse:
@@ -126,6 +133,38 @@ def create_supervisor_links(
 
     db.add_all(links)
     db.commit()
+
+
+def validate_folder_name(folder_name: str) -> None:
+    if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid folder name",
+        )
+
+
+def validate_file_extension(filename: str) -> None:
+    ext = Path(filename).suffix.lower()
+
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {ext}",
+        )
+
+
+def resolve_safe_data_folder(folder_name: str) -> Path:
+    validate_folder_name(folder_name)
+
+    target_folder = (DATA_DIR / folder_name).resolve()
+
+    if DATA_DIR not in target_folder.parents and target_folder != DATA_DIR:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid folder path",
+        )
+
+    return target_folder
 
 
 @app.get("/llm-models")
@@ -349,28 +388,12 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
     )
 
 
-ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
-
-
 @app.post("/documents/upload")
 async def upload_documents(
     folder_name: str = Form(...),
     files: list[UploadFile] = File(...),
 ):
-    if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid folder name",
-        )
-
-    target_folder = (DATA_DIR / folder_name).resolve()
-
-    if DATA_DIR not in target_folder.parents and target_folder != DATA_DIR:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid folder path",
-        )
-
+    target_folder = resolve_safe_data_folder(folder_name)
     target_folder.mkdir(parents=True, exist_ok=True)
 
     saved_files: list[str] = []
@@ -379,20 +402,15 @@ async def upload_documents(
         if not file.filename:
             continue
 
-        ext = Path(file.filename).suffix.lower()
+        validate_file_extension(file.filename)
 
-        if ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: {ext}",
-            )
+        safe_filename = Path(file.filename).name
+        file_path = target_folder / safe_filename
 
-        file_path = target_folder / file.filename
-
-        with open(file_path, "wb") as buffer:
+        with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        saved_files.append(file.filename)
+        saved_files.append(safe_filename)
 
     return {
         "message": "Files uploaded successfully",
@@ -403,19 +421,7 @@ async def upload_documents(
 
 @app.get("/documents/{folder_name}")
 async def get_documents(folder_name: str):
-    if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid folder name",
-        )
-
-    target_folder = (DATA_DIR / folder_name).resolve()
-
-    if DATA_DIR not in target_folder.parents and target_folder != DATA_DIR:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid folder path",
-        )
+    target_folder = resolve_safe_data_folder(folder_name)
 
     if not target_folder.exists():
         raise HTTPException(
@@ -457,25 +463,19 @@ async def get_document(
     filename: str,
     download: bool = False,
 ):
-    if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid folder name",
-        )
-
-    target_folder = (DATA_DIR / folder_name).resolve()
+    target_folder = resolve_safe_data_folder(folder_name)
     file_path = (target_folder / filename).resolve()
-
-    if not file_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="File not found",
-        )
 
     if target_folder not in file_path.parents:
         raise HTTPException(
             status_code=400,
             detail="Invalid filename",
+        )
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="File not found",
         )
 
     mime_type, _ = guess_type(file_path)
@@ -494,25 +494,82 @@ async def get_document(
     )
 
 
+@app.post("/admin/ingest/all")
+def admin_ingest_all(db: Session = Depends(get_db)):
+    return ingest_all_agents(db)
+
+
+@app.post("/admin/ingest/agent/{agent_name}")
+def admin_ingest_agent(agent_name: str, db: Session = Depends(get_db)):
+    return ingest_agent_by_name(db, agent_name)
+
+
+@app.post("/admin/documents/upload/{agent_name}")
+async def upload_document_for_agent(
+    agent_name: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    agent = (
+        db.query(Agent)
+        .filter(Agent.name == agent_name)
+        .filter(Agent.active.is_(True))
+        .first()
+    )
+
+    if not agent:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent not found: {agent_name}",
+        )
+
+    if agent.agent_type != "specialist":
+        raise HTTPException(
+            status_code=400,
+            detail="Documents can only be uploaded to specialist agents",
+        )
+
+    if not agent.docs_path:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent '{agent.name}' has no docs_path configured",
+        )
+
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing filename",
+        )
+
+    validate_file_extension(file.filename)
+
+    docs_dir = Path(agent.docs_path).resolve()
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_filename = Path(file.filename).name
+    target_path = docs_dir / safe_filename
+
+    with target_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    ingest_result = ingest_agent(agent)
+
+    return {
+        "status": "ok",
+        "message": "Document uploaded and agent index rebuilt successfully.",
+        "agent": agent.name,
+        "filename": safe_filename,
+        "saved_to": str(target_path),
+        "ingest": ingest_result,
+    }
+
+
 @app.delete("/documents/{folder_name}/{filename}")
 async def delete_document(
     folder_name: str,
     filename: str,
 ):
-    if not re.match(r"^[a-zA-Z0-9_-]+$", folder_name):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid folder name",
-        )
-
-    target_folder = (DATA_DIR / folder_name).resolve()
-
-    if DATA_DIR not in target_folder.parents and target_folder != DATA_DIR:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid folder path",
-        )
-
+    target_folder = resolve_safe_data_folder(folder_name)
     file_path = (target_folder / filename).resolve()
 
     if target_folder not in file_path.parents:
