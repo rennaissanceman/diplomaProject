@@ -1,121 +1,277 @@
 import '../../App.css';
 import "milligram";
-import {useState, useEffect} from "react";
-import {Link} from "react-router-dom";
-import {Modal} from 'antd';
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { Modal } from 'antd';
 
 const DocumentsManagement = () => {
-
     const [folderName, setFolderName] = useState("");
     const [files, setFiles] = useState([]);
     const [documents, setDocuments] = useState([]);
     const [folders, setFolders] = useState([]);
 
+    const [agents, setAgents] = useState([]);
+    const [selectedAgent, setSelectedAgent] = useState("");
+
     const [loading, setLoading] = useState(false);
+    const [adminLoading, setAdminLoading] = useState(false);
+
     const [error, setError] = useState("");
+    const [adminMessage, setAdminMessage] = useState("");
+    const [adminResult, setAdminResult] = useState(null);
+
     const [mode, setMode] = useState(null);
+
     const API_URL = "http://localhost:8000";
 
+    useEffect(() => {
+        fetch("/documents")
+            .then((res) => res.json())
+            .then((data) => setFolders(data.folders || []))
+            .catch((err) => {
+                console.error("Folders error:", err);
+            });
+    }, []);
 
-    const uploadDocument = async (e) => {
+    useEffect(() => {
+        fetch("/agents")
+            .then((res) => res.json())
+            .then((data) => {
+                const specialistAgents = data.filter(
+                    (agent) => agent.agent_type === "specialist"
+                );
+
+                setAgents(specialistAgents);
+
+                if (specialistAgents.length > 0) {
+                    setSelectedAgent(specialistAgents[0].name);
+                }
+            })
+            .catch((err) => {
+                console.error("Agents loading error:", err);
+                setError("Cannot load agents.");
+            });
+    }, []);
+
+    const refreshFolders = async () => {
+        try {
+            const res = await fetch("/documents");
+            const data = await res.json();
+
+            if (res.ok) {
+                setFolders(data.folders || []);
+            }
+        } catch (err) {
+            console.error("Folders refresh error:", err);
+        }
+    };
+
+    const uploadDocumentAndRebuild = async (e) => {
         e.preventDefault();
 
-        if (!folderName.trim()) {
-            setError("Folder name is required.");
+        if (!selectedAgent) {
+            setAdminMessage("Please select specialist agent.");
             return;
         }
 
         if (files.length === 0) {
-            setError("Please select at least one file.");
+            setAdminMessage("Please select document.");
             return;
         }
 
-        setLoading(true);
+        setAdminLoading(true);
+        setAdminMessage("");
+        setAdminResult(null);
         setError("");
 
         try {
             const formData = new FormData();
+            formData.append("file", files[0]);
 
-            formData.append("folder_name", folderName);
+            const response = await fetch(
+                `/admin/documents/upload/${encodeURIComponent(selectedAgent)}`,
+                {
+                    method: "POST",
+                    body: formData,
+                }
+            );
 
-            for (const file of files) {
-                formData.append("files", file);
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || "Upload failed");
             }
 
-            const res = await fetch("/documents/upload", {
-                method: "POST",
-                body: formData,
-            });
+            setAdminResult(data);
+            setAdminMessage(
+                "Document uploaded and agent index rebuilt successfully."
+            );
 
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(
-                    data.detail || "Upload failed"
-                );
-            }
-
-            setFolderName("");
             setFiles([]);
+            await refreshFolders();
+
+            const input = document.getElementById("ragUploadField");
+
+            if (input) {
+                input.value = "";
+            }
 
             Modal.success({
-                title: "Upload completed",
-                content: `${files.length} document(s) uploaded successfully.`,
-
+                title: "UPLOAD completed",
+                content: "Document uploaded and selected agent index rebuilt successfully.",
                 className: "milligram-confirm",
                 style: {
                     border: "2px solid #9b4dca",
                     borderRadius: "6px"
                 },
-
                 okButtonProps: {
                     className: "button button-outline"
                 }
             });
-
         } catch (err) {
+            console.error("RAG upload error:", err);
 
-            console.error("Upload error:", err);
-
-            setError(
+            const message =
                 err instanceof Error
                     ? err.message
-                    : "Unknown upload error"
-            );
+                    : "Unknown upload error";
+
+            setAdminMessage(message);
 
             Modal.error({
-                title: "Upload failed",
-                content:
-                    err instanceof Error
-                        ? err.message
-                        : "Unknown upload error",
-
+                title: "RAG upload failed",
+                content: message,
                 className: "milligram-confirm",
-
                 okButtonProps: {
                     className: "button"
                 }
             });
-
         } finally {
-            setLoading(false);
+            setAdminLoading(false);
         }
     };
 
-    useEffect(() => {
+    const ingestAll = async () => {
+        setAdminLoading(true);
+        setAdminMessage("");
+        setAdminResult(null);
+        setError("");
 
-        fetch("/documents")
-            .then((res) => res.json())
-            .then((data) => setFolders(data.folders))
-            .catch((err) => {
-                console.error("Folders error:", err);
+        try {
+            const response = await fetch("/admin/ingest/all", {
+                method: "POST",
             });
 
-    }, []);
+            const data = await response.json();
 
+            if (!response.ok) {
+                throw new Error(data.detail || "Ingest all failed");
+            }
+
+            setAdminResult(data);
+            setAdminMessage("All indexes rebuilt successfully.");
+
+            Modal.success({
+                title: "Ingest completed",
+                content: "All indexes rebuilt successfully.",
+                className: "milligram-confirm",
+                style: {
+                    border: "2px solid #9b4dca",
+                    borderRadius: "6px"
+                },
+                okButtonProps: {
+                    className: "button button-outline"
+                }
+            });
+        } catch (err) {
+            console.error("Ingest all error:", err);
+
+            const message =
+                err instanceof Error
+                    ? err.message
+                    : "Unknown ingest error";
+
+            setAdminMessage(message);
+
+            Modal.error({
+                title: "Ingest failed",
+                content: message,
+                className: "milligram-confirm",
+                okButtonProps: {
+                    className: "button"
+                }
+            });
+        } finally {
+            setAdminLoading(false);
+        }
+    };
+
+    const ingestAgent = async () => {
+        if (!selectedAgent) {
+            setAdminMessage("Please select specialist agent.");
+            return;
+        }
+
+        setAdminLoading(true);
+        setAdminMessage("");
+        setAdminResult(null);
+        setError("");
+
+        try {
+            const response = await fetch(
+                `/admin/ingest/agent/${encodeURIComponent(selectedAgent)}`,
+                {
+                    method: "POST",
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || "Agent ingest failed");
+            }
+
+            setAdminResult(data);
+            setAdminMessage(
+                `Index rebuilt successfully for ${selectedAgent}.`
+            );
+
+            Modal.success({
+                title: "Agent ingest completed",
+                content: `Index rebuilt successfully for ${selectedAgent}.`,
+                className: "milligram-confirm",
+                style: {
+                    border: "2px solid #9b4dca",
+                    borderRadius: "6px"
+                },
+                okButtonProps: {
+                    className: "button button-outline"
+                }
+            });
+        } catch (err) {
+            console.error("Agent ingest error:", err);
+
+            const message =
+                err instanceof Error
+                    ? err.message
+                    : "Unknown ingest error";
+
+            setAdminMessage(message);
+
+            Modal.error({
+                title: "Agent ingest failed",
+                content: message,
+                className: "milligram-confirm",
+                okButtonProps: {
+                    className: "button"
+                }
+            });
+        } finally {
+            setAdminLoading(false);
+        }
+    };
 
     const loadDocuments = async () => {
-
         if (!folderName.trim()) {
             setError("Folder name is required.");
             return;
@@ -126,7 +282,6 @@ const DocumentsManagement = () => {
         setDocuments([]);
 
         try {
-
             const res = await fetch(
                 `/documents/${folderName}`
             );
@@ -140,7 +295,6 @@ const DocumentsManagement = () => {
             }
 
             setDocuments(data.documents);
-
         } catch (err) {
             console.error("Documents loading error:", err);
 
@@ -153,7 +307,6 @@ const DocumentsManagement = () => {
             setLoading(false);
         }
     };
-
 
     const downloadDocument = (filename) => {
         window.open(
@@ -169,9 +322,7 @@ const DocumentsManagement = () => {
         );
     };
 
-
     const deleteDocument = (filename) => {
-
         Modal.confirm({
             title: "Are you sure you want to remove this document?",
             className: "milligram-confirm",
@@ -182,21 +333,16 @@ const DocumentsManagement = () => {
                 border: "2px solid #9b4dca",
                 borderRadius: "6px"
             },
-
             okButtonProps: {
                 className: "button button-outline"
             },
-
             cancelButtonProps: {
                 className: "button"
             },
-
             async onOk() {
-
                 try {
-
                     const res = await fetch(
-                        `/documents/${folderName}/${filename}`,
+                        `/documents/${folderName}/${encodeURIComponent(filename)}`,
                         {
                             method: "DELETE",
                         }
@@ -215,9 +361,7 @@ const DocumentsManagement = () => {
                             (doc) => doc.filename !== filename
                         )
                     );
-
                 } catch (err) {
-
                     console.error("Delete error:", err);
 
                     setError(
@@ -237,6 +381,8 @@ const DocumentsManagement = () => {
         setFiles([]);
         setDocuments([]);
         setError("");
+        setAdminMessage("");
+        setAdminResult(null);
     };
 
     return (
@@ -265,22 +411,24 @@ const DocumentsManagement = () => {
                     <button
                         className="button button-black button-outline"
                         onClick={() => {
-                            setMode("upload");
+                            setMode("rag");
                             clearAll();
                         }}
                     >
-                        Upload
+                        UPLOAD
                     </button>
                 </div>
 
                 {mode === "manage" && (
                     <div className="inline-form">
                         <h4>Manage documents</h4>
+
                         <label htmlFor="folderField">
                             Please select folder name
                         </label>
 
                         <select
+                            id="folderField"
                             value={folderName}
                             onChange={(e) =>
                                 setFolderName(e.target.value)
@@ -296,6 +444,7 @@ const DocumentsManagement = () => {
                                 </option>
                             ))}
                         </select>
+
                         <button
                             className="button button-black"
                             onClick={loadDocuments}
@@ -306,32 +455,81 @@ const DocumentsManagement = () => {
                     </div>
                 )}
 
-                {mode === "upload" && (
+                {mode === "rag" && (
                     <div className="inline-form">
-                        <h4>Upload documents</h4>
-                        <label htmlFor="folderField">
-                            Folder name
+                        <h4>RAG Admin Panel</h4>
+
+                        <p>
+                            Use this section to rebuild FAISS indexes or upload
+                            a new document and rebuild the selected specialist agent.
+                        </p>
+
+                        <button
+                            className="button button-black"
+                            type="button"
+                            onClick={ingestAll}
+                            disabled={adminLoading}
+                        >
+                            {
+                                adminLoading
+                                    ? "PROCESSING..."
+                                    : "REBUILD ALL INDEXES"
+                            }
+                        </button>
+
+                        <hr />
+
+                        <label htmlFor="agentField">
+                            Choose specialist agent
                         </label>
 
-                        <input
-                            type="text"
-                            value={folderName}
+                        <select
+                            id="agentField"
+                            value={selectedAgent}
                             onChange={(e) =>
-                                setFolderName(e.target.value)
+                                setSelectedAgent(e.target.value)
                             }
-                            placeholder="Enter folder name (new or existing)"
-                        />
-                        <br/>
-                        <form onSubmit={uploadDocument}>
+                            disabled={adminLoading}
+                        >
+                            <option value="">
+                                -- Select specialist agent --
+                            </option>
+
+                            {agents.map((agent) => (
+                                <option
+                                    key={agent.id}
+                                    value={agent.name}
+                                >
+                                    {agent.name}
+                                </option>
+                            ))}
+                        </select>
+
+                        <button
+                            className="button button-black"
+                            type="button"
+                            onClick={ingestAgent}
+                            disabled={adminLoading || !selectedAgent}
+                        >
+                            {
+                                adminLoading
+                                    ? "PROCESSING..."
+                                    : "REBUILD SELECTED AGENT"
+                            }
+                        </button>
+
+                        <hr />
+
+                        <form onSubmit={uploadDocumentAndRebuild}>
                             <fieldset>
-                                <label htmlFor="fileField">
-                                    Select documents
+                                <label htmlFor="ragUploadField">
+                                    Upload document to selected agent
                                 </label>
 
                                 <input
-                                    id="fileField"
+                                    id="ragUploadField"
                                     type="file"
-                                    multiple
+                                    accept=".txt,.md,.pdf"
                                     onChange={(e) =>
                                         setFiles(
                                             Array.from(
@@ -339,31 +537,30 @@ const DocumentsManagement = () => {
                                             )
                                         )
                                     }
+                                    disabled={adminLoading}
                                 />
-
                             </fieldset>
 
                             <button
-                                type="submit"
                                 className="button button-black"
+                                type="submit"
                                 disabled={
-                                    loading ||
-                                    !folderName.trim() ||
+                                    adminLoading ||
+                                    !selectedAgent ||
                                     files.length === 0
                                 }
                             >
                                 {
-                                    loading
-                                        ? "UPLOADING..."
-                                        : "UPLOAD DOCUMENTS"
+                                    adminLoading
+                                        ? "PROCESSING..."
+                                        : "UPLOAD DOCUMENT + REBUILD AGENT"
                                 }
                             </button>
-
                         </form>
 
                         {files.length > 0 && (
-                            <div style={{marginTop: "2rem"}}>
-                                <h4>Selected files</h4>
+                            <div style={{ marginTop: "2rem" }}>
+                                <h4>Selected file</h4>
                                 <ul>
                                     {files.map((file, index) => (
                                         <li key={`${file.name}-${index}`}>
@@ -372,6 +569,28 @@ const DocumentsManagement = () => {
                                     ))}
                                 </ul>
                             </div>
+                        )}
+
+                        {adminMessage && (
+                            <div
+                                style={{
+                                    border: "1px solid #ddd",
+                                    padding: "1rem",
+                                    marginTop: "1rem",
+                                }}
+                            >
+                                <strong>Status:</strong> {adminMessage}
+                            </div>
+                        )}
+
+                        {adminResult && (
+                            <details style={{ marginTop: "1rem" }}>
+                                <summary>Admin operation result JSON</summary>
+
+                                <pre style={{ whiteSpace: "pre-wrap" }}>
+                                    {JSON.stringify(adminResult, null, 2)}
+                                </pre>
+                            </details>
                         )}
                     </div>
                 )}
@@ -388,12 +607,11 @@ const DocumentsManagement = () => {
                     </div>
                 )}
 
-
                 {documents.length > 0 && (
-                    <div style={{marginTop: "2rem"}}>
+                    <div style={{ marginTop: "2rem" }}>
                         <h3>Documents</h3>
-                        <table>
 
+                        <table>
                             <thead>
                             <tr>
                                 <th>Filename</th>
@@ -404,20 +622,16 @@ const DocumentsManagement = () => {
                             </thead>
 
                             <tbody>
-
                             {documents.map((doc, index) => (
-
-                                <tr
-                                    key={`${doc.filename}-${index}`}
-                                >
-
+                                <tr key={`${doc.filename}-${index}`}>
                                     <td>{doc.filename}</td>
+
                                     <td>{doc.extension}</td>
+
                                     <td>
-                                        {(
-                                            doc.size_bytes / 1024
-                                        ).toFixed(2)} KB
+                                        {(doc.size_bytes / 1024).toFixed(2)} KB
                                     </td>
+
                                     <td
                                         style={{
                                             display: "flex",
