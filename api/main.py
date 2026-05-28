@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException, File, Form, UploadFile
+from fastapi import FastAPI, Depends, HTTPException, File, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -387,36 +387,6 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         ),
     )
 
-
-@app.post("/documents/upload")
-async def upload_documents(
-    folder_name: str = Form(...),
-    files: list[UploadFile] = File(...),
-):
-    target_folder = resolve_safe_data_folder(folder_name)
-    target_folder.mkdir(parents=True, exist_ok=True)
-
-    saved_files: list[str] = []
-
-    for file in files:
-        if not file.filename:
-            continue
-
-        validate_file_extension(file.filename)
-
-        safe_filename = Path(file.filename).name
-        file_path = target_folder / safe_filename
-
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        saved_files.append(safe_filename)
-
-    return {
-        "message": "Files uploaded successfully",
-        "folder": folder_name,
-        "files": saved_files,
-    }
 
 
 @app.get("/documents/{folder_name}")
